@@ -1,0 +1,29 @@
+# Déploiement de base. Le PIN est lu depuis un Docker secret (fichier secrets/pin.txt, hors dépôt).
+#   mkdir -p secrets && printf '%s' 'TON-PIN' > secrets/pin.txt && chmod 600 secrets/pin.txt
+services:
+  budget:
+    build: .
+    image: budget-tenable:latest
+    restart: unless-stopped
+    environment:
+      BUDGET_PIN_FILE: /run/secrets/budget_pin
+      # À mettre à "true" seulement si un reverse proxy est la SEULE porte d'entrée (voir README).
+      BUDGET_TRUST_PROXY: "true"
+      TZ: Europe/Paris
+    secrets:
+      - budget_pin
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8080:8080"   # le reverse proxy (Caddy, Traefik…) vient se brancher ici
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  budget_pin:
+    file: ./secrets/pin.txt

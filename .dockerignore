@@ -1,0 +1,7 @@
+**/bin
+**/obj
+.git
+data
+secrets
+docs
+*.md

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Budget tenable</title>
+<meta name="description" content="Suivi de budget du foyer, auto-hébergé.">
+<meta name="theme-color" content="#2753D6">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="login" id="login" hidden>
+  <form class="panel" id="loginForm" autocomplete="on">
+    <div><p class="eyebrow">Foyer</p><h1>Budget tenable</h1></div>
+    <div class="xf"><label for="pin">Code PIN</label><input id="pin" class="ctl pin" type="password" inputmode="numeric" autocomplete="current-password" required></div>
+    <button class="btn primary" type="submit" style="height:40px">Se connecter</button>
+    <p class="msg" id="loginMsg" role="alert"></p>
+  </form>
+</main>
+
+<div class="wrap" id="app" hidden>
+  <header class="top">
+    <div>
+      <p class="eyebrow" id="eyebrow">Foyer</p>
+      <h1>Budget tenable</h1>
+    </div>
+    <div class="top-actions">
+      <nav class="tabs" aria-label="Pages">
+        <a href="#suivi" id="tabSuivi">Suivi du mois</a>
+        <a href="#budget" id="tabBudget">Budget</a>
+        <a href="#tri" id="tabTri">À trier <span class="badge" id="triBadge" hidden>0</span></a>
+        <a href="#regles" id="tabRegles">Règles et import</a>
+      </nav>
+      <span id="budgetActions" class="top-actions" hidden>
+        <span id="chip" class="chip"><i></i><span id="chipTxt">&hellip;</span></span>
+        <button id="reset" class="btn" type="button">Réinitialiser</button>
+      </span>
+    </div>
+  </header>
+
+  <div class="view" id="view-budget" hidden>
+  <section class="kpis" id="kpis" aria-label="Chiffres clés"></section>
+  <p class="lede" id="lede"></p>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="h-rev">
+      <h2 id="h-rev">Revenus du budget</h2>
+      <p class="sub">Modifie un montant, tout le reste se recalcule. Les remboursements santé et les extras ne sont pas comptés.</p>
+      <div class="fields" id="incFields"></div>
+      <div class="total-line"><span>Total mensuel</span><span class="num" id="incTotal"></span></div>
+      <div class="opts">
+        <label class="chk" for="arkea"><input type="checkbox" id="arkea"><span>Crédit Arkea soldé<small>Retire 70 &euro; des charges fixes.</small></span></label>
+        <div class="field">
+          <label for="primes">Primes et intéressement<small>Par an, hors budget courant</small></label>
+          <div class="inp"><input id="primes" type="number" inputmode="decimal" min="0" step="100" aria-label="Primes par an"><span>&euro;/an</span></div>
+        </div>
+        <label class="chk" for="incPrimes"><input type="checkbox" id="incPrimes"><span>Inclure les primes dans la projection<small>Versées en épargne dès réception.</small></span></label>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-don">
+      <h2 id="h-don">Où va chaque euro</h2>
+      <p class="sub">Répartition des revenus mensuels du budget.</p>
+      <div class="donut-wrap">
+        <div id="donut" class="chart"></div>
+        <ul class="legend" id="legend"></ul>
+      </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="h-proj">
+      <h2 id="h-proj">Épargne cumulée sur 24 mois</h2>
+      <p class="sub" id="projSub"></p>
+      <div class="key" id="projKey"></div>
+      <div id="line" class="chart"></div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="h-alloc">
+      <h2 id="h-alloc">Répartition de l&rsquo;enveloppe variable</h2>
+      <p class="sub">Chaque poste est un pourcentage de l&rsquo;enveloppe (revenus moins charges fixes et provisions obligatoires). L&rsquo;épargne est ce qui reste : elle baisse si tu augmentes un poste.</p>
+      <div class="tbl"><table id="allocTbl"></table></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-fix">
+      <h2 id="h-fix">Charges fixes</h2>
+      <p class="sub">Ce sur quoi on ne joue pas pour l&rsquo;instant. Tu peux ajuster chaque montant.</p>
+      <div class="fields" id="fixFields"></div>
+      <div class="total-line"><span>Prélevé chaque mois</span><span class="num" id="fixTotal"></span></div>
+      <h2 style="margin-top:20px">Provisions obligatoires</h2>
+      <p class="sub">Payées une seule fois par an. Chaque mois, on met de côté un douzième de la facture.</p>
+      <div class="fields" id="provFields"></div>
+      <div class="total-line"><span>Mis de côté chaque mois</span><span class="num" id="provMandTotal"></span></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-pots">
+      <h2 id="h-pots">Pots de provisions</h2>
+      <p class="sub">Taxe foncière, assurance auto, voiture, bricolage et vacances ne partent pas de ton compte chaque mois : on les met de côté chaque mois sur le LDDS, et on paie depuis ce compte.</p>
+      <ul class="pots" id="pots"></ul>
+      <div class="total-line"><span>Virement automatique mensuel vers le LDDS</span><span class="num" id="potsTotal"></span></div>
+      <div class="rules">
+        <p><strong>Pas de dépense ce mois-ci ?</strong> L&rsquo;argent reste dans le pot. Il ne passe pas dans le shopping.</p>
+        <p><strong>Un gros frais tombe ?</strong> Il est payé par le pot, pas par la carte courante.</p>
+        <p><strong>Un pot déborde (plus de 2 fois son budget annuel) ?</strong> Le surplus part en épargne.</p>
+        <p><strong>Santé :</strong> pas de ligne. Tu avances les frais, les remboursements reviennent dans un pot santé.</p>
+      </div>
+    </section>
+  </div>
+  </div>
+
+  <div class="view" id="view-suivi">
+    <div class="mbar">
+      <div class="mnav">
+        <button class="btn" id="mPrev" type="button" aria-label="Mois précédent">&larr;</button>
+        <h2 class="mlabel" id="mLabel"></h2>
+        <button class="btn" id="mNext" type="button" aria-label="Mois suivant">&rarr;</button>
+        <button class="btn" id="mToday" type="button">Période actuelle</button>
+        <label class="dayf" for="pDay">Début de période<span class="inp"><input id="pDay" type="number" inputmode="numeric" min="1" max="28" step="1" aria-label="Jour de début de période"><span>du mois</span></span></label>
+      </div>
+      <div class="top-actions">
+        <span id="sChip" class="chip"><i></i><span id="sChipTxt"></span></span>
+        <span id="syncChip" class="chip"><i></i><span id="syncTxt"></span></span>
+        <button class="btn" id="exportBtn" type="button">Exporter en CSV</button>
+      </div>
+    </div>
+
+    <section class="kpis" id="sKpis" aria-label="Chiffres du mois"></section>
+    <p class="lede" id="sLede"></p>
+
+    <section class="panel" aria-labelledby="h-add">
+      <h2 id="h-add">Ajouter une dépense</h2>
+      <p class="sub">Une ligne par achat. Un remboursement se saisit avec la case dédiée.</p>
+      <form id="xForm" class="xform" autocomplete="off">
+        <div class="xf"><label for="xAmt">Montant</label><div class="inp"><input id="xAmt" type="text" inputmode="decimal" placeholder="0,00" aria-label="Montant"><span>&euro;</span></div></div>
+        <div class="xf w2"><label for="xCat">Catégorie</label><select id="xCat" class="ctl"></select></div>
+        <div class="xf"><label for="xDate">Date</label><input id="xDate" type="date" class="ctl"></div>
+        <div class="xf"><label for="xAcc">Compte</label><select id="xAcc" class="ctl"></select></div>
+        <div class="xf w2"><label for="xNote">Note</label><input id="xNote" type="text" class="ctl" maxlength="120" placeholder="Leclerc, plein, cadeau&hellip;"></div>
+        <div class="xf"><button class="btn primary" id="xSubmit" type="submit" style="height:36px">Ajouter</button></div>
+      </form>
+      <div class="xrow">
+        <label class="chk" for="xRef"><input type="checkbox" id="xRef"><span>Remboursement<small>Retire le montant de la catégorie.</small></span></label>
+        <button class="btn" id="xCancel" type="button" hidden>Annuler la modification</button>
+        <span class="msg" id="xMsg" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel" aria-labelledby="h-env">
+        <h2 id="h-env">Enveloppes de la période</h2>
+        <p class="sub" id="envSub"></p>
+        <div class="elist" id="envList"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-pace">
+        <h2 id="h-pace">Rythme de la période</h2>
+        <p class="sub">Dépenses variables cumulées, face à un budget réparti également sur le mois.</p>
+        <div class="key"><span><i style="border-color:var(--c-var)"></i>Dépensé</span><span><i class="dash" style="border-color:var(--muted)"></i>Rythme prévu</span></div>
+        <div id="paceChart" class="chart"></div>
+      </section>
+
+      <section class="panel wide" aria-labelledby="h-jr">
+        <h2 id="h-jr">Journal de la période</h2>
+        <div class="jfilters">
+          <select id="jCat" class="ctl" aria-label="Filtrer par catégorie"></select>
+          <input id="jQ" type="search" class="ctl" placeholder="Rechercher une note" aria-label="Rechercher une note">
+        </div>
+        <div class="jlist" id="jList"></div>
+        <div class="total-line"><span id="jTotLabel">Total</span><span class="num" id="jTot"></span></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-spots">
+        <h2 id="h-spots">Pots de provisions</h2>
+        <p class="sub">Solde estimé à la fin du mois : solde de départ, plus les virements mensuels, moins les dépenses payées avec le pot.</p>
+        <div id="potList"></div>
+        <h3 class="gh">Réglage des soldes</h3>
+        <div class="sg">
+          <div class="field"><label for="potStart">Première période de virement<small>Mois où elle commence</small></label><input id="potStart" class="ctl" type="month"></div>
+          <div id="potOpen" class="sg"></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-bil">
+        <h2 id="h-bil">Bilan de la période</h2>
+        <p class="sub">Ce qui reste sur le compte une fois les charges, les provisions et le variable payés.</p>
+        <div class="bil" id="bilan"></div>
+        <label class="chk" for="lddsDone" style="margin-top:14px"><input type="checkbox" id="lddsDone"><span id="lddsTxt">Virement vers le LDDS fait<small>Coche quand le virement automatique est parti.</small></span></label>
+      </section>
+
+      <section class="panel wide" aria-labelledby="h-hist">
+        <h2 id="h-hist">Six derniers mois</h2>
+        <p class="sub">Dépenses variables de chaque période (nommée d&rsquo;après son mois de début), comparées à l&rsquo;enveloppe actuelle.</p>
+        <div class="key"><span><i style="border-color:var(--c-var)"></i>Dans l&rsquo;enveloppe</span><span><i style="border-color:var(--bad)"></i>Au-dessus</span><span><i class="dash" style="border-color:var(--muted)"></i>Enveloppe</span></div>
+        <div id="histChart" class="chart"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="view" id="view-tri" hidden>
+    <section class="panel" aria-labelledby="h-tri">
+      <h2 id="h-tri">À trier</h2>
+      <p class="sub">Les opérations que les règles n'ont pas reconnues. Choisis une catégorie : on te propose d'en faire une règle pour la prochaine fois.</p>
+      <div id="ruleOffer" class="banner" hidden></div>
+      <div id="triList"></div>
+      <p class="msg" id="triMsg" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <div class="view" id="view-regles" hidden>
+    <div class="grid">
+      <section class="panel" aria-labelledby="h-imp">
+        <h2 id="h-imp">Importer un relevé</h2>
+        <p class="sub">Fichier CSV ou OFX/QFX téléchargé sur le site de ta banque. Les opérations déjà importées sont ignorées : tu peux réimporter sans risque.</p>
+        <div class="drop">
+          <div class="xf"><label for="impAcc">Compte</label><select id="impAcc" class="ctl"></select></div>
+          <div class="xf"><label for="impFile">Fichier</label><input id="impFile" class="ctl" type="file" accept=".csv,.ofx,.qfx,.txt,text/csv" style="height:auto;padding:6px 10px"></div>
+          <div class="row-actions"><button class="btn primary" id="impBtn" type="button">Importer</button><span class="msg" id="impMsg" role="status" aria-live="polite"></span></div>
+          <div class="result" id="impResult" hidden></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-data">
+        <h2 id="h-data">Données et session</h2>
+        <p class="sub">Toutes les opérations, y compris celles à trier, au format CSV (séparateur point-virgule, ouvrable dans un tableur).</p>
+        <div class="row-actions">
+          <button class="btn" id="exportBtn2" type="button">Exporter en CSV</button>
+          <button class="btn" id="logoutBtn" type="button">Se déconnecter</button>
+        </div>
+        <p class="mutline" style="margin-top:14px">Connexion bancaire automatique : pas encore disponible (phase 2). L'import de relevés reste possible ensuite.</p>
+      </section>
+
+      <section class="panel wide" aria-labelledby="h-rules">
+        <h2 id="h-rules">Règles de classement</h2>
+        <p class="sub">La règle de priorité la plus haute qui correspond gagne. Le texte est comparé sans tenir compte des majuscules ni des accents. Un classement fait à la main n'est jamais écrasé.</p>
+        <div id="ruleList"></div>
+        <form id="ruleForm" class="rform" autocomplete="off">
+          <div class="xf"><label for="rPat">Motif</label><input id="rPat" class="ctl" type="text" maxlength="200" placeholder="LECLERC" required></div>
+          <div class="xf"><label for="rCat">Classer dans</label><select id="rCat" class="ctl"></select></div>
+          <div class="xf"><label for="rField">Chercher dans</label><select id="rField" class="ctl"><option value="both">Contrepartie et libellé</option><option value="counterparty">Contrepartie</option><option value="remittance">Libellé</option></select></div>
+          <div class="xf"><label for="rDir">Sens</label><select id="rDir" class="ctl"><option value="any">Débit ou crédit</option><option value="debit">Débit seulement</option><option value="credit">Crédit seulement</option></select></div>
+          <div class="xf"><label for="rMin">Montant min.</label><div class="inp"><input id="rMin" type="text" inputmode="decimal" placeholder="—"><span>&euro;</span></div></div>
+          <div class="xf"><label for="rMax">Montant max.</label><div class="inp"><input id="rMax" type="text" inputmode="decimal" placeholder="—"><span>&euro;</span></div></div>
+          <div class="xf"><label for="rPrio">Priorité</label><input id="rPrio" class="ctl" type="number" value="0" min="-1000" max="1000"></div>
+          <div class="xf"><label class="chk" for="rRx"><input type="checkbox" id="rRx"><span>Expression régulière</span></label></div>
+          <div class="xf full row-actions"><button class="btn primary" type="submit">Ajouter la règle</button><button class="btn" id="reapplyBtn" type="button">Réappliquer les règles</button><span class="msg" id="ruleMsg" role="status" aria-live="polite"></span></div>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <footer>
+    <p>Montants estimés à partir des relevés bancaires perso et commun (avril à octobre 2026) et des bulletins de paie de septembre et octobre 2026. Chaque ligne est une moyenne, à ajuster ci-dessus.</p>
+    <p>Estimations de budget personnel, pas un conseil financier.</p>
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
