@@ -46,19 +46,32 @@ public static class ImportExportEndpoints
             if (rows.Count == 0) return Results.Ok(new ImportResult(format, 0, 0, 0, 0, 0));
 
             var assigned = Fingerprint.Assign(rows);
-            var min = rows.Min(r => r.Date);
-            var max = rows.Max(r => r.Date);
-            var known = (await db.Transactions.AsNoTracking()
-                    .Where(t => t.AccountId == accountId && t.ProviderTransactionId != null && t.BookingDate >= min && t.BookingDate <= max)
-                    .Select(t => t.ProviderTransactionId!)
-                    .ToListAsync(ct)).ToHashSet();
+            var min = rows.Min(r => r.Date).AddDays(-Reconciler.WindowDays);
+            var max = rows.Max(r => r.Date).AddDays(Reconciler.WindowDays);
+            // Suivies par EF : une saisie manuelle ou une opération en attente rapprochée est mise à jour sur place.
+            var existing = await db.Transactions
+                .Where(t => t.AccountId == accountId && t.BookingDate >= min && t.BookingDate <= max)
+                .ToListAsync(ct);
+            var matches = Reconciler.Match(assigned, existing.Select(Reconciler.ToCandidate).ToList());
 
             var rules = RuleMatcher.Ordered(await db.Rules.AsNoTracking().ToListAsync(ct));
             var now = time.GetUtcNow().UtcDateTime;
-            int added = 0, duplicates = 0, categorized = 0;
-            foreach (var (row, id) in assigned)
+            var knownIds = existing.Where(t => t.ProviderTransactionId != null).Select(t => t.ProviderTransactionId!).ToHashSet();
+            int added = 0, duplicates = 0, categorized = 0, reconciled = 0;
+            for (var i = 0; i < assigned.Count; i++)
             {
-                if (!known.Add(id)) { duplicates++; continue; }
+                var (row, id) = assigned[i];
+                var m = matches[i];
+                if (m.Kind == MatchKind.Duplicate) { duplicates++; continue; }
+                // Sans aperçu, on ne fusionne que les cas sûrs ; un doute ajoute l'opération plutôt que d'en écraser une.
+                if (m.Kind == MatchKind.Reconcile && !m.Ambiguous)
+                {
+                    Reconciler.Merge(existing.First(t => t.Id == m.ExistingId), row, id);
+                    knownIds.Add(id);
+                    reconciled++;
+                    continue;
+                }
+                if (!knownIds.Add(id)) { duplicates++; continue; }
                 var tx = new Transaction
                 {
                     AccountId = accountId,
@@ -78,7 +91,7 @@ public static class ImportExportEndpoints
             await db.SaveChangesAsync(ct);
 
             var toSort = await db.Transactions.CountAsync(t => t.CategoryId == null && !t.IsInternalTransfer, ct);
-            return Results.Ok(new ImportResult(format, rows.Count, added, duplicates, categorized, toSort));
+            return Results.Ok(new ImportResult(format, rows.Count, added, duplicates, categorized, toSort, reconciled));
         });
 
         api.MapGet("/export.csv", async (BudgetDbContext db, CancellationToken ct) =>

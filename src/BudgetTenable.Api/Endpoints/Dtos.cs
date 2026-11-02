@@ -41,5 +41,36 @@ public sealed record RuleInput(
 
 public sealed record RuleCreated(RuleDto Rule, int Applied);
 public sealed record ApplyRulesRequest(bool? All);
-public sealed record ImportResult(string Format, int Parsed, int Added, int Duplicates, int Categorized, int ToSort);
+public sealed record ImportResult(string Format, int Parsed, int Added, int Duplicates, int Categorized, int ToSort, int Reconciled = 0);
 public sealed record LoginRequest(string? Pin);
+
+// ----- Collage d'opérations depuis le site de la banque -----
+public sealed record PastePreviewRequest(string? Text, int? AccountId);
+
+public sealed record ExistingRef(int Id, DateOnly Date, string Label, string? CategoryId, bool IsManual, bool IsPending);
+
+public sealed record PasteItem(
+    int Index, DateOnly Date, string? Time, decimal Amount, string Label, string? Detail, string? BankCategory, string? PaymentMethod,
+    bool Pending, string ProviderId,
+    /// <summary>new, duplicate ou reconcile.</summary>
+    string Kind, bool Ambiguous, ExistingRef? Existing,
+    string? SuggestedCategoryId,
+    /// <summary>rule, mapping, existing ou none.</summary>
+    string SuggestionSource, bool Internal,
+    /// <summary>Catégorie bancaire normalisée : relie l'opération à sa ligne dans <see cref="BankCategoryInfo"/>.</summary>
+    string? BankKey);
+
+public sealed record BankCategoryInfo(string Key, string Label, int Count, bool Known, bool Ignored, string? MappedCategoryId, string? MatchingCategoryId);
+public sealed record PastePreview(int AccountId, List<PasteItem> Items, List<BankCategoryInfo> BankCategories, int Ignored);
+
+public sealed record CommitItem(
+    DateOnly Date, string? Label, string? Detail, string? BankCategory, string? PaymentMethod, bool Pending, decimal Amount, string? ProviderId,
+    /// <summary>add, reconcile ou skip.</summary>
+    string? Action, int? ReconcileId, string? CategoryId, string? NewCategoryKey, bool Internal);
+public sealed record NewCategory(string Key, string Label, CategoryGroup Group);
+public sealed record CommitMapping(string BankCategory, string? CategoryId, string? NewCategoryKey, bool Ignore);
+public sealed record PasteCommitRequest(int AccountId, List<CommitItem>? Items, List<NewCategory>? NewCategories, List<CommitMapping>? Mappings);
+public sealed record PasteCommitResult(int Added, int Reconciled, int Skipped, int CategoriesCreated, int MappingsSaved, int ToSort);
+
+public sealed record CategoryCreate(string? Label, CategoryGroup? Group);
+public sealed record BankCategoryDto(string Key, string Label, string? CategoryId);

@@ -372,6 +372,7 @@
     const accs = ACCOUNTS.map((a) => '<option value="' + a.id + '">' + esc(a.label) + '</option>').join('');
     $('xAcc').innerHTML = accs;
     $('impAcc').innerHTML = accs;
+    $('pasteAcc').innerHTML = accs;
     $('potOpen').innerHTML = CATS.filter((c) => c.group === 'pot').map((c) =>
       '<div class="field"><label for="open-' + esc(c.id) + '">' + esc(c.label) + '<small>Solde au premier mois</small></label><div class="inp"><input id="open-' + esc(c.id) + '" data-open="' + esc(c.id) + '" type="number" inputmode="decimal" step="10"><span>&euro;</span></div></div>').join('');
   }
@@ -552,7 +553,7 @@
       $('jList').innerHTML = list.map((t) => {
         const armed = pendDel === t.id;
         const cat = t.isInternalTransfer ? 'Virement interne' : t.categoryId ? catLabel(t.categoryId) : 'À trier';
-        const tag = t.isInternalTransfer ? '' : !t.categoryId ? '<span class="tag todo">à trier</span>' : '';
+        const tag = (t.isInternalTransfer ? '' : !t.categoryId ? '<span class="tag todo">à trier</span>' : '') + (t.status === 'pending' ? '<span class="tag pend">en attente</span>' : '');
         const detail = [t.note || (t.counterparty && t.remittance ? t.remittance : ''), t.note ? txLabel(t) : (t.counterparty || (t.remittance && !t.note ? t.remittance : '')), t.accountLabel].filter(Boolean);
         const sub = Array.from(new Set(detail)).map(esc).join(' &middot; ');
         const credit = t.amount > 0;
@@ -677,7 +678,7 @@
       const credit = t.amount > 0;
       const sub = [t.counterparty && t.remittance ? t.remittance : '', t.note, t.accountLabel].filter(Boolean).map(esc).join(' &middot; ');
       return '<div class="tri"><span class="jd num">' + frDate(t.date, true).slice(0, 5) + '<br>' + t.date.slice(0, 4) + '</span>' +
-        '<div class="jm"><b>' + esc(txLabel(t)) + '</b><span>' + sub + '</span></div>' +
+        '<div class="jm"><b>' + esc(txLabel(t)) + (t.status === 'pending' ? '<span class="tag pend">en attente</span>' : '') + '</b><span>' + sub + '</span></div>' +
         '<span class="ja num ' + (credit ? 'pos' : '') + '">' + (credit ? '+' : '−') + f2(Math.abs(t.amount)) + '</span>' +
         '<select class="ctl" data-tri="' + t.id + '" aria-label="Catégorie de ' + esc(txLabel(t)) + '">' + opts + '</select>' +
         '<span class="acts"><button class="btn sm" type="button" data-tri-act="internal" data-id="' + t.id + '">Virement interne</button></span></div>';
@@ -717,11 +718,181 @@
     };
   }
 
+
+  /* ================= Coller des opérations de la banque ================= */
+  let PV = null;   // aperçu en cours : { accountId, items, bank, ignored }
+  const BK_GROUPS = [['variable', 'Variable mensuel (part de l’enveloppe)'], ['pot', 'Pot de provisions'], ['fixe', 'Charge fixe'], ['ignore', 'Hors budget']];
+
+  async function refreshBudget() {
+    await flushSave();
+    const b = await api('/budget');
+    S = b.settings; CATS = b.categories;
+    buildInputs(); buildTable(); fillInputs(); buildSelects(); fillPot();
+  }
+
+  function pasteMsg(t, err) { const m = $('pasteMsg'); m.textContent = t || ''; m.className = 'msg' + (err ? ' err' : ''); }
+
+  async function pasteAnalyze() {
+    const text = $('pasteTxt').value;
+    if (!text.trim()) { pasteMsg('Colle d’abord les opérations copiées depuis ta banque.', true); return; }
+    pasteMsg('Analyse…');
+    $('pasteGo').disabled = true;
+    try {
+      const r = await api('/paste/preview', { method: 'POST', json: { text: text, accountId: +$('pasteAcc').value } });
+      PV = {
+        accountId: r.accountId,
+        ignored: r.ignored,
+        bank: r.bankCategories.filter((b) => !b.known).map((b) => ({
+          key: b.key, label: b.label, count: b.count, choice: b.matchingCategoryId || '', newLabel: b.label, newGroup: 'variable', remember: true,
+        })),
+        items: r.items.map((i) => ({
+          i: i, include: i.kind !== 'duplicate', action: i.kind === 'reconcile' && !i.ambiguous ? 'reconcile' : 'add',
+          cat: i.suggestedCategoryId || '', override: false,
+        })),
+      };
+      PV.bank.forEach((b) => applyBankChoice(b.key));
+      pasteMsg('');
+      renderPaste();
+    } catch (e) { pasteMsg(e.message, true); }
+    finally { $('pasteGo').disabled = false; }
+  }
+
+  /** Répercute le choix fait sur une catégorie bancaire aux opérations qui n'ont ni règle ni choix individuel. */
+  function applyBankChoice(key) {
+    const b = PV.bank.find((x) => x.key === key);
+    PV.items.forEach((it) => {
+      if (it.i.bankKey !== key || it.override || it.i.suggestionSource !== 'none') return;
+      it.cat = b.choice === '' || b.choice === '__ignore' ? '' : b.choice === '__create' ? 'new:' + key : b.choice;
+    });
+  }
+
+  function pasteCatOptions(selected) {
+    const created = PV.bank.filter((b) => b.choice === '__create').map((b) => '<option value="new:' + esc(b.key) + '">➕ ' + esc(b.newLabel || b.label) + ' (nouvelle)</option>').join('');
+    const html = '<option value="">À trier</option>' + created + catOptionsHtml();
+    return html.replace('value="' + selected + '"', 'value="' + selected + '" selected');
+  }
+
+  function renderPaste() {
+    const box = $('pastePreview');
+    if (!PV) { box.hidden = true; box.innerHTML = ''; $('pasteInput').hidden = false; return; }
+    $('pasteInput').hidden = true;
+    box.hidden = false;
+    const its = PV.items, picked = its.filter((x) => x.include);
+    const nNew = its.filter((x) => x.i.kind === 'new').length, nRec = its.filter((x) => x.i.kind === 'reconcile').length, nDup = its.filter((x) => x.i.kind === 'duplicate').length;
+    let h = '<p class="pv-sum"><b>' + its.length + '</b> opération' + (its.length > 1 ? 's' : '') + ' reconnue' + (its.length > 1 ? 's' : '') + ' : <b>' + nNew + '</b> nouvelle' + (nNew > 1 ? 's' : '') +
+      (nRec ? ', <b>' + nRec + '</b> à rapprocher' : '') + (nDup ? ', <b>' + nDup + '</b> déjà connue' + (nDup > 1 ? 's' : '') : '') +
+      (PV.ignored ? ' · ' + PV.ignored + ' bloc' + (PV.ignored > 1 ? 's' : '') + ' illisible' + (PV.ignored > 1 ? 's' : '') + ' ignoré' + (PV.ignored > 1 ? 's' : '') : '') + '.</p>';
+
+    if (PV.bank.length) {
+      h += '<h3 class="gh">Catégories de la banque à associer</h3><p class="mutline">Choisis une fois : la correspondance est retenue pour les prochains collages. Une nouvelle catégorie démarre à 0 % de l’enveloppe ; règle sa part dans l’onglet Budget.</p>';
+      PV.bank.forEach((b) => {
+        const opts = '<option value="">À choisir…</option><option value="__create">➕ Créer une catégorie</option><option value="__ignore">Ne pas utiliser cette catégorie</option>' + catOptionsHtml();
+        h += '<div class="bk"><div><b>' + esc(b.label) + '</b><br><span class="mut">' + b.count + ' opération' + (b.count > 1 ? 's' : '') + '</span></div>' +
+          '<select class="ctl" data-bk="' + esc(b.key) + '" aria-label="Catégorie pour ' + esc(b.label) + '">' + opts.replace('value="' + b.choice + '"', 'value="' + b.choice + '" selected') + '</select>';
+        if (b.choice === '__create') {
+          h += '<div class="sub2"><input class="ctl" data-bknew="' + esc(b.key) + '" value="' + esc(b.newLabel) + '" maxlength="120" aria-label="Nom de la nouvelle catégorie">' +
+            '<select class="ctl" data-bkgroup="' + esc(b.key) + '" aria-label="Type de la nouvelle catégorie">' + BK_GROUPS.map((g) => '<option value="' + g[0] + '"' + (g[0] === b.newGroup ? ' selected' : '') + '>' + g[1] + '</option>').join('') + '</select></div>';
+        }
+        if (b.choice !== '') h += '<label class="chk sub2" for="rem-' + esc(b.key) + '"><input type="checkbox" id="rem-' + esc(b.key) + '" data-bkrem="' + esc(b.key) + '"' + (b.remember ? ' checked' : '') + '><span>Retenir pour la suite</span></label>';
+        h += '</div>';
+      });
+    }
+
+    h += '<h3 class="gh">Opérations</h3>';
+    h += its.map((it, idx) => {
+      const p = it.i, dup = p.kind === 'duplicate';
+      const credit = p.amount > 0;
+      const tags = (p.pending ? '<span class="tag pend">en attente</span>' : '') + (dup ? '<span class="tag dup">déjà connue</span>' : '') + (p.kind === 'reconcile' ? '<span class="tag merge">à rapprocher</span>' : '') +
+        (p.suggestionSource === 'rule' ? '<span class="tag">règle</span>' : '');
+      const sub = [p.detail, p.bankCategory].filter(Boolean).map(esc).join(' &middot; ');
+      let row = '<div class="pv' + (it.include ? '' : ' off') + '"><input type="checkbox" data-pvinc="' + idx + '"' + (it.include ? ' checked' : '') + (dup ? ' disabled' : '') + ' aria-label="Inclure ' + esc(p.label) + '">' +
+        '<span class="jd num">' + frDate(p.date) + (p.time ? '<br>' + esc(p.time) : '') + '</span>' +
+        '<div class="jm"><b>' + esc(p.label) + tags + '</b><span>' + sub + '</span></div>' +
+        '<span class="ja num ' + (credit ? 'pos' : '') + '">' + (credit ? '+' : '−') + f2(Math.abs(p.amount)) + '</span>';
+      if (!dup) row += '<select class="ctl" data-pvcat="' + idx + '" aria-label="Catégorie de ' + esc(p.label) + '">' + pasteCatOptions(it.cat) + '</select>';
+      if (p.kind === 'reconcile' && p.existing) {
+        const ex = p.existing;
+        row += '<select class="ctl" data-pvact="' + idx + '" aria-label="Rapprochement"><option value="reconcile"' + (it.action === 'reconcile' ? ' selected' : '') + '>Rapprocher avec « ' + esc(ex.label || 'saisie') + ' » du ' + frDate(ex.date) + (ex.isPending ? ' (en attente)' : '') + '</option><option value="add"' + (it.action === 'add' ? ' selected' : '') + '>Ajouter en plus</option></select>';
+        if (p.ambiguous) row += '<span class="hint">Plusieurs opérations possibles : vérifie avant de rapprocher.</span>';
+      }
+      return row + '</div>';
+    }).join('');
+
+    const n = picked.length;
+    h += '<div class="row-actions" style="margin-top:14px"><button class="btn primary" type="button" id="pvOk"' + (n ? '' : ' disabled') + '>' + (n ? 'Valider ' + n + ' opération' + (n > 1 ? 's' : '') : 'Rien à ajouter') + '</button><button class="btn" type="button" id="pvCancel">Annuler</button><span class="msg" id="pvMsg" role="status" aria-live="polite"></span></div>';
+    box.innerHTML = h;
+  }
+
+  async function pasteCommit() {
+    const msg = $('pvMsg');
+    const picked = PV.items.filter((x) => x.include);
+    const used = new Set(picked.map((x) => x.cat).filter((c) => c.startsWith('new:')).map((c) => c.slice(4)));
+    PV.bank.forEach((b) => { if (b.choice === '__create' && b.remember) used.add(b.key); });
+    const missing = PV.bank.find((b) => b.choice === '__create' && used.has(b.key) && !b.newLabel.trim());
+    if (missing) { msg.className = 'msg err'; msg.textContent = 'Donne un nom à la nouvelle catégorie.'; return; }
+
+    const body = {
+      accountId: PV.accountId,
+      newCategories: PV.bank.filter((b) => b.choice === '__create' && used.has(b.key)).map((b) => ({ key: b.key, label: b.newLabel.trim(), group: b.newGroup })),
+      mappings: PV.bank.filter((b) => b.choice !== '' && b.remember).map((b) => ({
+        bankCategory: b.label, ignore: b.choice === '__ignore',
+        categoryId: b.choice === '__create' || b.choice === '__ignore' ? null : b.choice, newCategoryKey: b.choice === '__create' ? b.key : null,
+      })),
+      items: picked.map((it) => {
+        const p = it.i, isNew = it.cat.startsWith('new:');
+        return {
+          date: p.date, label: p.label, detail: p.detail, bankCategory: p.bankCategory, paymentMethod: p.paymentMethod, pending: p.pending, amount: p.amount, providerId: p.providerId,
+          action: it.action, reconcileId: it.action === 'reconcile' && p.existing ? p.existing.id : null,
+          categoryId: it.cat && !isNew ? it.cat : null, newCategoryKey: isNew ? it.cat.slice(4) : null, internal: p.suggestionSource === 'rule' && p.internal,
+        };
+      }),
+    };
+    $('pvOk').disabled = true;
+    msg.className = 'msg'; msg.textContent = 'Enregistrement…';
+    try {
+      const r = await api('/paste/commit', { method: 'POST', json: body });
+      const last = picked.map((x) => x.i.date).sort().pop();
+      PV = null;
+      $('pasteTxt').value = '';
+      renderPaste();
+      if (r.categoriesCreated) await refreshBudget();
+      if (last) M = pkeyOf(last) > currentKey() ? currentKey() : pkeyOf(last);
+      $('xDate').value = defaultDate();
+      const bits = [r.added + ' ajoutée' + (r.added > 1 ? 's' : ''), r.reconciled ? r.reconciled + ' rapprochée' + (r.reconciled > 1 ? 's' : '') : '', r.categoriesCreated ? r.categoriesCreated + ' catégorie' + (r.categoriesCreated > 1 ? 's' : '') + ' créée' + (r.categoriesCreated > 1 ? 's' : '') : '', r.toSort ? r.toSort + ' à trier' : ''].filter(Boolean);
+      pasteMsg(bits.join(' · ') + '.');
+      setBadge(r.toSort);
+      await loadSuivi();
+    } catch (e) { $('pvOk').disabled = false; msg.className = 'msg err'; msg.textContent = e.message; }
+  }
+
+  function onPasteInput(e) {
+    if (!PV) return;
+    const t = e.target, d = t.dataset;
+    if (d.bk !== undefined) { const b = PV.bank.find((x) => x.key === d.bk); b.choice = t.value; applyBankChoice(b.key); renderPaste(); }
+    else if (d.bknew !== undefined) { PV.bank.find((x) => x.key === d.bknew).newLabel = t.value; if (e.type === 'change') renderPaste(); }
+    else if (d.bkgroup !== undefined) PV.bank.find((x) => x.key === d.bkgroup).newGroup = t.value;
+    else if (d.bkrem !== undefined) PV.bank.find((x) => x.key === d.bkrem).remember = t.checked;
+    else if (d.pvinc !== undefined) { PV.items[+d.pvinc].include = t.checked; renderPaste(); }
+    else if (d.pvcat !== undefined) { const it = PV.items[+d.pvcat]; it.cat = t.value; it.override = true; }
+    else if (d.pvact !== undefined) PV.items[+d.pvact].action = t.value;
+  }
+
+  async function loadBankMap() {
+    try {
+      const list = await api('/bank-categories');
+      $('bankList').innerHTML = list.length ? list.map((m) =>
+        '<div class="bankrow"><div><strong>' + esc(m.label) + '</strong> &rarr; ' + (m.categoryId ? esc(catLabel(m.categoryId)) : '<span class="mut">catégorie non utilisée</span>') +
+        '</div><button class="btn sm danger" type="button" data-bkdel="' + esc(m.key) + '">Oublier</button></div>').join('')
+        : '<div class="empty">Aucune correspondance retenue pour l’instant.</div>';
+    } catch (e) { if (e.status !== 401) $('bankList').textContent = e.message; }
+  }
+
   /* ================= Onglet Règles et import ================= */
   const FIELD_LABEL = { both: 'Contrepartie et libellé', counterparty: 'Contrepartie', remittance: 'Libellé' };
   const DIR_LABEL = { any: '', debit: 'débits seulement', credit: 'crédits seulement' };
 
   async function loadRules() {
+    loadBankMap();
     try { RULES = await api('/rules'); renderRules(); }
     catch (e) { if (e.status !== 401) $('ruleMsg').textContent = e.message; }
   }
@@ -932,6 +1103,19 @@
     if (b) classify(+b.dataset.id, null, true);
   });
   $('ruleList').addEventListener('click', onRuleClick);
+  $('pasteGo').addEventListener('click', pasteAnalyze);
+  const pv = $('pastePreview');
+  pv.addEventListener('change', onPasteInput);
+  pv.addEventListener('input', (e) => { if (e.target.dataset.bknew !== undefined) onPasteInput(e); });
+  pv.addEventListener('click', (e) => {
+    if (e.target.id === 'pvOk') pasteCommit();
+    else if (e.target.id === 'pvCancel') { PV = null; renderPaste(); pasteMsg(''); }
+  });
+  $('bankList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-bkdel]');
+    if (!b) return;
+    try { await api('/bank-categories?key=' + encodeURIComponent(b.dataset.bkdel), { method: 'DELETE' }); await loadBankMap(); } catch (err) { $('bankList').textContent = err.message; }
+  });
   $('ruleForm').addEventListener('submit', submitRule);
   $('reapplyBtn').addEventListener('click', reapply);
   $('impBtn').addEventListener('click', doImport);

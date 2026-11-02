@@ -12,7 +12,13 @@ public sealed record ParsedTransaction(
     string? Counterparty,
     string? Remittance,
     /// <summary>Identifiant fourni par la banque (FITID OFX), s'il existe.</summary>
-    string? ProviderId);
+    string? ProviderId,
+    /// <summary>Catégorie telle qu'affichée par la banque (texte collé), simple indication.</summary>
+    string? BankCategory = null,
+    /// <summary>Opération « en cours » : pas encore débitée.</summary>
+    bool Pending = false,
+    TimeOnly? Time = null,
+    string? PaymentMethod = null);
 
 public sealed class ImportFormatException(string message) : Exception(message);
 

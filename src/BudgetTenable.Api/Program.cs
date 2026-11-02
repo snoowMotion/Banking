@@ -90,6 +90,7 @@ api.MapBudget();
 api.MapTransactions();
 api.MapRules();
 api.MapImportExport();
+api.MapPaste();
 api.Map("{**rest}", () => Results.NotFound(new { error = "Introuvable." }));
 
 app.Run();

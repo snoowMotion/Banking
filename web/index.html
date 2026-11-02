@@ -147,6 +147,16 @@
       </div>
     </section>
 
+    <section class="panel" aria-labelledby="h-paste">
+      <h2 id="h-paste">Coller des opérations de la banque</h2>
+      <p class="sub">Copie la liste des opérations sur le site de ta banque, colle-la ici : libellé, date, montant et catégorie sont reconnus. Tu vérifies avant d'ajouter.</p>
+      <div id="pasteInput" class="drop">
+        <div class="xf"><label for="pasteTxt">Texte copié</label><textarea id="pasteTxt" class="ctl area" rows="5" spellcheck="false" placeholder="1. LECLERC&#10;lun. 2 nov. à 10h33&#10;Supermarchés&#10;Carte bancaire&#10;En cours&#10;-21,60 €"></textarea></div>
+        <div class="row-actions"><select id="pasteAcc" class="ctl" style="width:auto" aria-label="Compte"></select><button class="btn primary" id="pasteGo" type="button">Analyser</button><span class="msg" id="pasteMsg" role="status" aria-live="polite"></span></div>
+      </div>
+      <div id="pastePreview" hidden></div>
+    </section>
+
     <div class="grid">
       <section class="panel" aria-labelledby="h-env">
         <h2 id="h-env">Enveloppes de la période</h2>
@@ -229,6 +239,12 @@
           <button class="btn" id="logoutBtn" type="button">Se déconnecter</button>
         </div>
         <p class="mutline" style="margin-top:14px">Connexion bancaire automatique : pas encore disponible (phase 2). L'import de relevés reste possible ensuite.</p>
+      </section>
+
+      <section class="panel wide" aria-labelledby="h-bank">
+        <h2 id="h-bank">Catégories de la banque retenues</h2>
+        <p class="sub">Les correspondances mémorisées quand tu colles des opérations. Oublie-en une pour qu'elle te soit redemandée au prochain collage.</p>
+        <div id="bankList"></div>
       </section>
 
       <section class="panel wide" aria-labelledby="h-rules">

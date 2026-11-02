@@ -61,6 +61,7 @@ budget.example.fr {
 
 - **Suivi du mois** : dépensé, reste, reste par jour, projection, enveloppes, rythme, journal filtrable, pots, bilan, six dernières périodes, export CSV.
 - **Budget** : revenus, charges fixes, provisions, pourcentages par poste. Tout se recalcule en direct et s'enregistre sur le serveur.
+- **Coller des opérations** (dans « Suivi du mois ») : copie la liste des opérations sur le site de ta banque et colle-la. Libellé, date, montant, statut (« En cours » = en attente) et catégorie bancaire sont reconnus ; l'année se déduit du jour de la semaine. Un aperçu te laisse tout corriger avant de valider. Pour chaque catégorie bancaire inconnue, tu choisis une catégorie existante, d'en créer une (elle démarre à 0 % de l'enveloppe, à régler dans l'onglet Budget) ou de ne pas l'utiliser. La correspondance est retenue pour les collages suivants (liste et oubli dans « Règles et import »). Ordre de priorité : tes règles, puis la catégorie déjà posée sur l'opération rapprochée, puis la correspondance bancaire.
 - **À trier** : opérations non reconnues. Chaque tri propose de créer une règle (« toujours classer X en Y »).
 - **Règles et import** : import CSV/OFX, gestion des règles. Les opérations déjà importées sont ignorées : on peut réimporter un relevé qui chevauche le précédent.
 
@@ -70,7 +71,8 @@ CSV (séparateur `;`, `,` ou tabulation, UTF-8 ou Windows-1252) avec une colonne
 
 ### Règles métier appliquées
 
-- Doublons : clé unique (compte, identifiant fournisseur). Sans identifiant (CSV), empreinte date + montant + contrepartie + libellé, avec un rang pour deux opérations identiques le même jour.
+- Doublons : clé unique (compte, identifiant fournisseur). Sans identifiant (CSV), empreinte date + montant + contrepartie + libellé, avec un rang pour deux opérations identiques le même jour. Pour un collage, l'empreinte inclut l'heure.
+- Rapprochement (collage, CSV, OFX) : même compte et même montant exact. Une saisie manuelle se rapproche à ±5 jours ; une opération « en attente » à ±5 jours si l'enseigne ressemble ; une opération déjà débitée seulement le même jour et pour la même enseigne. Le statut passe alors à « débitée » et la saisie garde sa note et sa catégorie. Dans l'aperçu d'un collage, tu peux refuser un rapprochement ; à l'import CSV/OFX, sans aperçu, seuls les cas sans ambiguïté sont fusionnés.
 - Virements internes : exclus du budget et de « À trier ». Un crédit rattaché à une catégorie y réduit la dépense (remboursement).
 - Une dépense imputée à un pot réduit le solde du pot, pas l'enveloppe variable.
 - Un classement manuel n'est jamais écrasé par une règle.
@@ -88,7 +90,7 @@ Restauration : arrête le conteneur, remplace `data/budget.db` par la sauvegarde
 
 ## Limites connues de la phase 1
 
-- Une saisie manuelle puis l'import de la même opération donnent deux lignes : l'application ne rapproche pas encore saisie et banque.
+- Le rapprochement repose sur le montant exact et des dates proches : deux achats identiques à quelques jours d'écart chez la même enseigne peuvent être confondus avec une saisie manuelle. L'aperçu du collage permet de le voir et de le refuser.
 - Le fichier `Dockerfile` et le `docker-compose.yml` n'ont pas été construits dans l'environnement de développement (pas de démon Docker) ; ils suivent les images officielles .NET 8.
 - Deux imports de fichiers qui coupent une journée en deux peuvent, dans de rares cas d'opérations strictement identiques le même jour, se dédoubler ou se confondre. Les relevés par jour complet ne posent pas de problème.
 - Les calculs de l'onglet Budget existent en JavaScript (simulation instantanée) et en C# (référence testée) : à modifier ensemble.

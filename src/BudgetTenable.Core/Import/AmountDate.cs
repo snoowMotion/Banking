@@ -23,7 +23,7 @@ public static partial class AmountDate
     {
         value = 0;
         if (string.IsNullOrWhiteSpace(s)) return false;
-        var t = s.Trim().Replace(" ", "").Replace(" ", "").Replace(" ", "").Replace("€", "").Replace("EUR", "", StringComparison.OrdinalIgnoreCase);
+        var t = s.Trim().Replace('\u2212', '-').Replace('\u2013', '-').Replace("\u00A0", "").Replace("\u202F", "").Replace(" ", "").Replace("€", "").Replace("EUR", "", StringComparison.OrdinalIgnoreCase);
         var negative = false;
         if (t.StartsWith('(') && t.EndsWith(')')) { negative = true; t = t[1..^1]; }
         if (t.StartsWith('+')) t = t[1..];

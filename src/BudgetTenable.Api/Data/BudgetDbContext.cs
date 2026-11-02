@@ -17,6 +17,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Rule> Rules => Set<Rule>();
+    public DbSet<BankCategoryMapping> BankCategoryMappings => Set<BankCategoryMapping>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -56,6 +57,15 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.HasIndex(x => new { x.AccountId, x.ProviderTransactionId }).IsUnique();
             e.HasIndex(x => x.BookingDate);
             e.HasIndex(x => new { x.CategoryId, x.IsInternalTransfer });
+        });
+
+        b.Entity<BankCategoryMapping>(e =>
+        {
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(120);
+            e.Property(x => x.Label).HasMaxLength(120).IsRequired();
+            e.Property(x => x.CategoryId).HasMaxLength(40);
+            e.HasOne<Category>().WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.SetNull);
         });
 
         b.Entity<Rule>(e =>

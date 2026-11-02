@@ -76,3 +76,15 @@ public class Rule
     public decimal? MaxAmount { get; set; }
     public bool Enabled { get; set; } = true;
 }
+
+/// <summary>
+/// Correspondance retenue entre une catégorie affichée par la banque et une catégorie de l'appli.
+/// Une catégorie nulle signifie « ne pas utiliser cette catégorie bancaire ».
+/// </summary>
+public class BankCategoryMapping
+{
+    /// <summary>Libellé bancaire normalisé (sans accents, en majuscules).</summary>
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? CategoryId { get; set; }
+}

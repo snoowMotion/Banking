@@ -65,6 +65,28 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.ToTable("Accounts");
                 });
 
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankCategoryMapping", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CategoryId")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("CategoryId");
+
+                    b.ToTable("BankCategoryMappings");
+                });
+
             modelBuilder.Entity("BudgetTenable.Core.Domain.Category", b =>
                 {
                     b.Property<string>("Id")
@@ -223,6 +245,14 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.HasIndex("CategoryId", "IsInternalTransfer");
 
                     b.ToTable("Transactions");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankCategoryMapping", b =>
+                {
+                    b.HasOne("BudgetTenable.Core.Domain.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("BudgetTenable.Core.Domain.Rule", b =>
