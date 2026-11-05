@@ -43,6 +43,16 @@
   </header>
 
   <div class="view" id="view-budget" hidden>
+    <div class="mbar" id="bBar">
+      <div class="mnav">
+        <button class="btn" id="bPrev" type="button" aria-label="Période précédente">&larr;</button>
+        <h2 class="mlabel" id="bLabel"></h2>
+        <button class="btn" id="bNext" type="button" aria-label="Période suivante">&rarr;</button>
+        <button class="btn" id="bToday" type="button">Période actuelle</button>
+      </div>
+    </div>
+    <p class="sub" id="bNote" style="margin:0;max-width:90ch"></p>
+    <div class="banner warn" id="bLater" hidden></div>
   <section class="kpis" id="kpis" aria-label="Chiffres clés"></section>
   <p class="lede" id="lede"></p>
 
@@ -53,7 +63,6 @@
       <div class="fields" id="incFields"></div>
       <div class="total-line"><span>Total mensuel</span><span class="num" id="incTotal"></span></div>
       <div class="opts">
-        <label class="chk" for="arkea"><input type="checkbox" id="arkea"><span>Crédit Arkea soldé<small>Retire 70 &euro; des charges fixes.</small></span></label>
         <div class="field">
           <label for="primes">Primes et intéressement<small>Par an, hors budget courant</small></label>
           <div class="inp"><input id="primes" type="number" inputmode="decimal" min="0" step="100" aria-label="Primes par an"><span>&euro;/an</span></div>
@@ -106,6 +115,33 @@
         <p><strong>Un pot déborde (plus de 2 fois son budget annuel) ?</strong> Le surplus part en épargne.</p>
         <p><strong>Santé :</strong> pas de ligne. Tu avances les frais, les remboursements reviennent dans un pot santé.</p>
       </div>
+    </section>
+
+    <section class="panel wide" aria-labelledby="h-addcat">
+      <h2 id="h-addcat">Ajouter une charge ou une catégorie</h2>
+      <p class="sub">Elle existe à partir de la période affichée en haut ; les périodes d&rsquo;avant ne changent pas. L&rsquo;aperçu montre l&rsquo;effet sur l&rsquo;enveloppe et l&rsquo;épargne.</p>
+      <form id="catForm" class="rform" autocomplete="off">
+        <div class="xf"><label for="ncType">Type</label><select id="ncType" class="ctl">
+          <option value="fixe">Charge fixe (prélevée chaque mois)</option>
+          <option value="variable">Catégorie variable (part de l&rsquo;enveloppe)</option>
+          <option value="pot">Pot de provisions (part de l&rsquo;enveloppe)</option>
+          <option value="annual">Provision annuelle (1/12 chaque mois)</option>
+          <option value="ignore">Hors budget (revenu, remboursement&hellip;)</option></select></div>
+        <div class="xf"><label for="ncLabel">Nom</label><input id="ncLabel" class="ctl" type="text" maxlength="120" required></div>
+        <div class="xf" id="ncValWrap"><label for="ncVal" id="ncValLabel">Montant mensuel</label><div class="inp"><input id="ncVal" type="text" inputmode="decimal" placeholder="0"><span id="ncUnit">&euro;</span></div></div>
+        <div class="xf" id="ncAccWrap"><label for="ncAcc">Compte de prélèvement</label><select id="ncAcc" class="ctl"></select></div>
+        <div class="xf" id="ncOpenWrap" hidden><label for="ncOpen">Solde de départ du pot</label><div class="inp"><input id="ncOpen" type="text" inputmode="decimal" placeholder="0"><span>&euro;</span></div></div>
+        <div class="xf full"><label for="ncNote">Note (facultatif)</label><input id="ncNote" class="ctl" type="text" maxlength="200" placeholder="Ex. habitation, juridique, Homeserve"></div>
+        <div class="xf full"><div class="result" id="ncImpact" aria-live="polite"></div></div>
+        <div class="xf full row-actions"><button class="btn primary" type="submit" id="ncGo">Ajouter</button><span class="msg" id="ncMsg" role="status" aria-live="polite"></span></div>
+      </form>
+    </section>
+
+    <section class="panel wide" aria-labelledby="h-manage">
+      <h2 id="h-manage">Gérer les catégories</h2>
+      <p class="sub"><strong>Arrêter</strong> retire une catégorie du budget à partir de la période affichée, sans toucher à l&rsquo;historique. <strong>Fusionner</strong> déplace ses opérations, ses règles et ses correspondances bancaires vers une autre catégorie (utile pour un doublon). <strong>Supprimer</strong> n&rsquo;est possible que si rien n&rsquo;y est classé.</p>
+      <div id="manageList"></div>
+      <p class="msg" id="mgMsg" role="status" aria-live="polite"></p>
     </section>
   </div>
   </div>
@@ -279,6 +315,15 @@
     <p>Estimations de budget personnel, pas un conseil financier.</p>
   </footer>
 </div>
+
+<dialog id="mergeDlg" aria-labelledby="mergeTitle">
+  <form method="dialog" id="mergeForm">
+    <h2 id="mergeTitle">Fusionner</h2>
+    <p class="sub" id="mergeText"></p>
+    <div class="xf"><label for="mergeInto">Fusionner dans</label><select id="mergeInto" class="ctl"></select></div>
+    <div class="row-actions" style="margin-top:14px"><button class="btn primary" type="submit" value="ok" id="mergeOk">Fusionner</button><button class="btn" type="submit" value="cancel" formnovalidate>Annuler</button></div>
+  </form>
+</dialog>
 
 <script src="app.js"></script>
 </body>

@@ -96,6 +96,10 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.Property<int?>("AccountId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ActiveFrom")
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("Amount")
                         .HasColumnType("TEXT");
 
@@ -129,6 +133,75 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.HasIndex("AccountId");
 
                     b.ToTable("Categories");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.CategoryTerm", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CategoryId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("From")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Percentage")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("CategoryId", "From")
+                        .IsUnique();
+
+                    b.ToTable("CategoryTerms");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.IncomeTerm", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("AnnualBonus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Caf")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("From")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Net")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Partner")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("From")
+                        .IsUnique();
+
+                    b.ToTable("IncomeTerms");
                 });
 
             modelBuilder.Entity("BudgetTenable.Core.Domain.Rule", b =>
@@ -266,6 +339,20 @@ namespace BudgetTenable.Api.Data.Migrations
                         .WithMany()
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.CategoryTerm", b =>
+                {
+                    b.HasOne("BudgetTenable.Core.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BudgetTenable.Core.Domain.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("BudgetTenable.Core.Domain.Rule", b =>

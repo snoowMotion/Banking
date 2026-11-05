@@ -18,6 +18,8 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Rule> Rules => Set<Rule>();
     public DbSet<BankCategoryMapping> BankCategoryMappings => Set<BankCategoryMapping>();
+    public DbSet<CategoryTerm> CategoryTerms => Set<CategoryTerm>();
+    public DbSet<IncomeTerm> IncomeTerms => Set<IncomeTerm>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -30,7 +32,23 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(x => x.Label).HasMaxLength(120).IsRequired();
             e.Property(x => x.Group).HasConversion<string>().HasMaxLength(12);
             e.Ignore(x => x.IsAllocation);
+            e.Property(x => x.ActiveFrom).HasMaxLength(7);
             e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<CategoryTerm>(e =>
+        {
+            e.Property(x => x.CategoryId).HasMaxLength(40).IsRequired();
+            e.Property(x => x.From).HasMaxLength(7).IsRequired();
+            e.HasIndex(x => new { x.CategoryId, x.From }).IsUnique();
+            e.HasOne<Category>().WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<IncomeTerm>(e =>
+        {
+            e.Property(x => x.From).HasMaxLength(7).IsRequired();
+            e.HasIndex(x => x.From).IsUnique();
         });
 
         b.Entity<Account>(e =>

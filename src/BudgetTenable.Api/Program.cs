@@ -63,12 +63,15 @@ if (trustProxy)
 var app = builder.Build();
 
 await using (var scope = app.Services.CreateAsyncScope())
-    await BudgetStore.InitializeAsync(scope.ServiceProvider.GetRequiredService<BudgetDbContext>());
+    await BudgetStore.InitializeAsync(scope.ServiceProvider.GetRequiredService<BudgetDbContext>(), scope.ServiceProvider.GetRequiredService<IClock>());
 
 app.UseExceptionHandler(e => e.Run(async ctx =>
 {
-    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
-    await ctx.Response.WriteAsJsonAsync(new { error = "Erreur interne." });
+    // Une requête illisible (JSON invalide, valeur d'énumération inconnue…) est une erreur du client, pas du serveur.
+    var error = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    var clientError = error is Microsoft.AspNetCore.Http.BadHttpRequestException;
+    ctx.Response.StatusCode = clientError ? StatusCodes.Status400BadRequest : StatusCodes.Status500InternalServerError;
+    await ctx.Response.WriteAsJsonAsync(new { error = clientError ? "Requête invalide." : "Erreur interne." });
 }));
 if (trustProxy) app.UseForwardedHeaders();
 app.UseSecurityHeaders();
@@ -92,6 +95,7 @@ api.MapRules();
 api.MapImportExport();
 api.MapPaste();
 api.MapFixed();
+api.MapCategories();
 api.Map("{**rest}", () => Results.NotFound(new { error = "Introuvable." }));
 
 app.Run();

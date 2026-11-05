@@ -18,16 +18,6 @@ public static class PasteEndpoints
         api.MapPost("/paste/preview", Preview);
         api.MapPost("/paste/commit", Commit);
 
-        api.MapPost("/categories", async (CategoryCreate input, BudgetDbContext db, CancellationToken ct) =>
-        {
-            if (CategoryCreator.Validate(input.Label) is { } err) return BudgetEndpoints.Bad(err);
-            var all = await db.Categories.ToListAsync(ct);
-            if (CategoryCreator.FindByLabel(all, input.Label!) is not null) return Results.Conflict(new { error = "Une catégorie porte déjà ce nom." });
-            var c = CategoryCreator.Create(db, all, input.Label!, input.Group ?? CategoryGroup.Variable);
-            await db.SaveChangesAsync(ct);
-            return Results.Created($"/api/categories/{c.Id}", CategoryDto.From(c));
-        });
-
         api.MapGet("/bank-categories", async (BudgetDbContext db, CancellationToken ct) =>
             (await db.BankCategoryMappings.AsNoTracking().OrderBy(m => m.Label).ToListAsync(ct)).Select(m => new BankCategoryDto(m.Key, m.Label, m.CategoryId)).ToList());
 
@@ -63,15 +53,14 @@ public static class PasteEndpoints
         var categories = await db.Categories.AsNoTracking().ToListAsync(ct);
 
         // Charges fixes pas encore payées dans la période de chaque opération : un montant identique à l'une d'elles est une piste.
-        var settings = await store.GetSettingsAsync(ct);
-        var day = settings.StartDay;
-        var fixedCats = categories.Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0 && !(c.Id == BudgetCalculator.ArkeaId && settings.ArkeaSettled)).ToList();
+        var timeline = await store.LoadTimelineAsync(ct);
+        var day = (await store.GetSettingsAsync(ct)).StartDay;
+        var fixedIds = timeline.AllCategories.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
         var paidFixed = new HashSet<(string, string)>();
-        if (fixedCats.Count > 0)
+        if (fixedIds.Count > 0)
         {
             var from = Periods.Start(Periods.KeyFor(parsed.Items.Min(x => x.Date), day), day);
             var to = Periods.EndExclusive(Periods.KeyFor(parsed.Items.Max(x => x.Date), day), day);
-            var fixedIds = fixedCats.Select(c => c.Id).ToHashSet();
             var rows = await db.Transactions.AsNoTracking()
                 .Where(t => t.CategoryId != null && !t.IsInternalTransfer && t.BookingDate >= from && t.BookingDate < to)
                 .Select(t => new { t.CategoryId, t.BookingDate }).ToListAsync(ct);
@@ -98,7 +87,9 @@ public static class PasteEndpoints
             {
                 // Piste, jamais imposée : même montant exact qu'UNE seule charge fixe encore à payer, et soit un libellé qui lui
                 // ressemble, soit un prélèvement (un montant rond seul donnerait trop de fausses pistes).
-                var period = Periods.KeyFor(p.Date, day).ToString();
+                var periodKey = Periods.KeyFor(p.Date, day);
+                var period = periodKey.ToString();
+                var fixedCats = timeline.At(periodKey).Categories.Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0);
                 var text = $"{p.Counterparty} {p.Remittance}";
                 var debit = TextNormalizer.Normalize(p.PaymentMethod).StartsWith("PRELEVEMENT", StringComparison.Ordinal);
                 var hits = fixedCats
@@ -127,7 +118,7 @@ public static class PasteEndpoints
         return Results.Ok(new PastePreview(account.Id, items, bank, parsed.Ignored));
     }
 
-    private static async Task<IResult> Commit(PasteCommitRequest req, BudgetDbContext db, TimeProvider time, CancellationToken ct)
+    private static async Task<IResult> Commit(PasteCommitRequest req, BudgetDbContext db, BudgetStore store, IClock clock, TimeProvider time, CancellationToken ct)
     {
         var inItems = req.Items ?? new();
         if (inItems.Count == 0) return BudgetEndpoints.Bad("Rien à ajouter.");
@@ -137,16 +128,22 @@ public static class PasteEndpoints
 
         await using var dbTx = await db.Database.BeginTransactionAsync(ct);
 
-        // 1. Nouvelles catégories (un libellé déjà pris est réutilisé plutôt que dupliqué).
+        // 1. Nouvelles catégories (un libellé déjà pris est réutilisé plutôt que dupliqué). Elles existent dès la période de
+        //    leur plus ancienne opération collée, pour que ces opérations comptent dans le budget de leur période.
+        var settings = await store.GetSettingsAsync(ct);
+        var accountIds = (await db.Accounts.Select(a => a.Id).ToListAsync(ct)).ToHashSet();
         var categories = await db.Categories.ToListAsync(ct);
         var created = 0;
         var newIds = new Dictionary<string, string>();
         foreach (var n in req.NewCategories ?? new())
         {
             if (string.IsNullOrWhiteSpace(n.Key)) return BudgetEndpoints.Bad("Catégorie à créer sans clé.");
-            if (CategoryCreator.Validate(n.Label) is { } err) return BudgetEndpoints.Bad(err);
-            var found = CategoryCreator.FindByLabel(categories, n.Label);
-            if (found is null) { found = CategoryCreator.Create(db, categories, n.Label, n.Group); created++; }
+            var dates = inItems.Where(i => i.NewCategoryKey == n.Key && (i.Action ?? "add") != "skip").Select(i => i.Date).ToList();
+            var from = dates.Count > 0 ? Periods.KeyFor(dates.Min(), settings.StartDay).ToString() : Periods.KeyFor(clock.Today, settings.StartDay).ToString();
+            var spec = new NewCategorySpec(n.Label ?? "", n.Group, false, n.Percentage ?? 0, n.Amount ?? 0, n.AccountId, null, from);
+            if (CategoryCreator.Validate(spec, accountIds) is { } err) return BudgetEndpoints.Bad(err);
+            var found = CategoryCreator.FindByLabel(categories, n.Label!);
+            if (found is null) { found = CategoryCreator.Create(db, categories, spec); created++; }
             newIds[n.Key] = found.Id;
         }
         var knownIds = categories.Select(c => c.Id).ToHashSet();

@@ -3,14 +3,31 @@ using BudgetTenable.Core.Domain;
 
 namespace BudgetTenable.Api.Endpoints;
 
-public sealed record CategoryDto(string Id, string Label, CategoryGroup Group, decimal Percentage, decimal Amount, bool Annual, string? Note, decimal CurrentAverage, int Order, int? AccountId)
+public sealed record CategoryDto(
+    string Id, string Label, CategoryGroup Group, decimal Percentage, decimal Amount, bool Annual, string? Note, decimal CurrentAverage, int Order, int? AccountId,
+    /// <summary>Existe à la période demandée.</summary>
+    bool Active,
+    /// <summary>Existe à la période en cours (sert aux listes de choix).</summary>
+    bool ActiveNow,
+    string? ActiveFrom,
+    /// <summary>Période à partir de laquelle la catégorie est arrêtée, si elle l'est à la période demandée.</summary>
+    string? EndedFrom,
+    /// <summary>Nombre d'opérations classées dedans.</summary>
+    int UsedBy)
 {
-    public static CategoryDto From(Category c) => new(c.Id, c.Label, c.Group, c.Percentage, c.Amount, c.Annual, c.Note, c.CurrentAverage, c.Order, c.AccountId);
+    public static CategoryDto From(CategoryState st, bool activeNow, int usedBy)
+    {
+        var c = st.Category;
+        return new(c.Id, c.Label, c.Group, c.Percentage, c.Amount, c.Annual, c.Note, c.CurrentAverage, c.Order, c.AccountId, st.Active, activeNow, c.ActiveFrom, st.EndedFrom, usedBy);
+    }
 }
 
-public sealed record BudgetDto(BudgetSettings Settings, List<CategoryDto> Categories, DateOnly Today, string CurrentPeriod);
+public sealed record LaterChange(string Kind, string? CategoryId, string From);
+public sealed record BudgetDto(BudgetSettings Settings, List<CategoryDto> Categories, DateOnly Today, string CurrentPeriod, string Period, List<LaterChange> LaterChanges);
 public sealed record CategoryUpdate(string Id, string? Label, decimal? Percentage, decimal? Amount, int? AccountId = null);
-public sealed record BudgetUpdate(BudgetSettings Settings, List<CategoryUpdate>? Categories);
+/// <summary>Modification du budget à partir de <paramref name="Period"/> (la période en cours si absente).</summary>
+public sealed record BudgetUpdate(BudgetSettings Settings, List<CategoryUpdate>? Categories, string? Period = null, bool? Propagate = null);
+public sealed record ResetRequest(string? Period);
 
 public sealed record AccountDto(int Id, string Label, AccountType Type, string Currency);
 
@@ -67,12 +84,17 @@ public sealed record CommitItem(
     DateOnly Date, string? Label, string? Detail, string? BankCategory, string? PaymentMethod, bool Pending, decimal Amount, string? ProviderId,
     /// <summary>add, reconcile ou skip.</summary>
     string? Action, int? ReconcileId, string? CategoryId, string? NewCategoryKey, bool Internal);
-public sealed record NewCategory(string Key, string Label, CategoryGroup Group);
+public sealed record NewCategory(string Key, string Label, CategoryGroup Group, decimal? Amount = null, decimal? Percentage = null, int? AccountId = null);
 public sealed record CommitMapping(string BankCategory, string? CategoryId, string? NewCategoryKey, bool Ignore);
 public sealed record PasteCommitRequest(int AccountId, List<CommitItem>? Items, List<NewCategory>? NewCategories, List<CommitMapping>? Mappings);
 public sealed record PasteCommitResult(int Added, int Reconciled, int Skipped, int CategoriesCreated, int MappingsSaved, int ToSort);
 
-public sealed record CategoryCreate(string? Label, CategoryGroup? Group);
+public sealed record CategoryCreate(
+    string? Label, CategoryGroup? Group, bool? Annual = null, decimal? Percentage = null, decimal? Amount = null,
+    int? AccountId = null, string? Note = null, string? From = null, decimal? Opening = null);
+public sealed record CategoryEdit(string? Label, string? Note);
+public sealed record ArchiveInput(string? From);
+public sealed record MergeInput(string? IntoId);
 public sealed record BankCategoryDto(string Key, string Label, string? CategoryId);
 
 public sealed record FixedPaidInput(decimal? Amount, int? AccountId, DateOnly? Date);

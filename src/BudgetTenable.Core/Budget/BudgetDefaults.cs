@@ -33,7 +33,7 @@ public static class BudgetDefaults
             Annual("tf", "Taxe foncière", 1432, "Payée une fois par an (septembre)"),
             Annual("auto", "Assurance auto", 396, "Payée une fois par an (octobre)"),
             Fixed("immo", "Crédit immo SOFIAP", 959),
-            Fixed(BudgetCalculator.ArkeaId, "Crédit Arkea", 70),
+            Fixed("arkea", "Crédit Arkea", 70),
             Fixed("tel", "Télécom (Free box + mobile)", 92),
             Fixed("eau", "Eau + EDF", 62),
             Fixed("assur", "Assurances", 75, "Habitation, juridique, Homeserve, prévoyance"),

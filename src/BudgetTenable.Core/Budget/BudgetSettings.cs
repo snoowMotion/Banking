@@ -1,3 +1,5 @@
+using BudgetTenable.Core.Domain;
+
 namespace BudgetTenable.Core.Budget;
 
 public class IncomeSettings
@@ -8,13 +10,15 @@ public class IncomeSettings
     public decimal Total => Net + Partner + Caf;
 }
 
-/// <summary>Réglages du budget (hors catégories, dont les montants et pourcentages vivent sur <c>Category</c>).</summary>
+/// <summary>
+/// Réglages du budget. Les revenus et la prime annuelle sont les valeurs de départ : leurs changements datés sont des <see cref="IncomeTerm"/>.
+/// Les montants et pourcentages des catégories vivent sur <c>Category</c> et <see cref="CategoryTerm"/>.
+/// </summary>
 public class BudgetSettings
 {
     public IncomeSettings Income { get; set; } = new();
     public decimal AnnualBonus { get; set; } = 3000;
     public bool IncludeBonus { get; set; } = true;
-    public bool ArkeaSettled { get; set; }
     /// <summary>Jour de début de période, de 1 à 28.</summary>
     public int StartDay { get; set; } = 28;
     /// <summary>Première période de virement (yyyy-MM).</summary>

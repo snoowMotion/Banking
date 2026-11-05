@@ -4,7 +4,7 @@ namespace BudgetTenable.Core.Budget;
 
 public sealed record EnvelopeLine(string CategoryId, string Label, decimal Budget, decimal Spent);
 public sealed record PotLine(string CategoryId, string Label, decimal Monthly, decimal Balance, decimal SpentThisPeriod);
-public sealed record HistoryPoint(string Key, string Label, int MonthIndex, decimal Spent);
+public sealed record HistoryPoint(string Key, string Label, int MonthIndex, decimal Spent, decimal Budget);
 
 /// <summary>Une charge fixe de la période : montant attendu face à ce qui a été réellement classé dedans.</summary>
 public sealed record FixedLine(
@@ -59,6 +59,8 @@ public readonly record struct SpendEntry(DateOnly Date, string CategoryId, decim
 public static class PeriodSummaryCalculator
 {
     public const int HistoryLength = 6;
+    public const string InactiveEnvelopeId = "__inactive";
+    private const int MaxPotMonths = 600;
 
     /// <summary>Fenêtre de dates dont <see cref="Calculate"/> a besoin pour une période donnée.</summary>
     public static (DateOnly From, DateOnly To) RequiredWindow(BudgetSettings s, PeriodKey key)
@@ -72,14 +74,17 @@ public static class PeriodSummaryCalculator
         return (from, Periods.EndExclusive(key, s.StartDay));
     }
 
-    /// <param name="entries">Transactions catégorisées, hors virements internes, dans la fenêtre requise.</param>
+    /// <summary>Budget sans historique (mêmes valeurs à toutes les périodes).</summary>
     public static PeriodSummary Calculate(
-        BudgetSettings s,
-        IReadOnlyCollection<Category> categories,
-        IReadOnlyCollection<SpendEntry> entries,
-        PeriodKey key,
-        DateOnly today)
+        BudgetSettings s, IReadOnlyCollection<Category> categories, IReadOnlyCollection<SpendEntry> entries, PeriodKey key, DateOnly today) =>
+        Calculate(BudgetTimeline.Static(s, categories), entries, key, today);
+
+    /// <param name="entries">Transactions catégorisées, hors virements internes, dans la fenêtre requise.</param>
+    public static PeriodSummary Calculate(BudgetTimeline timeline, IReadOnlyCollection<SpendEntry> entries, PeriodKey key, DateOnly today)
     {
+        var view = timeline.At(key);
+        var s = view.Settings;
+        var categories = view.Categories;
         var r = BudgetCalculator.Compute(s, categories);
         var day = s.StartDay;
         var start = Periods.Start(key, day);
@@ -91,21 +96,26 @@ public static class PeriodSummaryCalculator
         var isPast = key < current;
         var elapsed = isCurrent ? Periods.Elapsed(key, day, today) : (isPast ? length : 0);
 
+        // Une dépense reste comptée même si sa catégorie est arrêtée ou n'existait pas encore à cette période.
+        var all = timeline.AllCategories;
+        var fixedIds = all.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
+        var variableIds = all.Where(c => c.Group == CategoryGroup.Variable).Select(c => c.Id).ToHashSet();
+
         bool InPeriod(SpendEntry e) => e.Date >= start && e.Date < endEx;
         var inPeriodAll = entries.Where(InPeriod).ToList();
-        var fixedIds = categories.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
         var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId)).ToList();
         var spentBy = inPeriod.GroupBy(e => e.CategoryId).ToDictionary(g => g.Key, g => g.Sum(e => e.Spent));
         decimal SpentIn(string id) => spentBy.GetValueOrDefault(id);
 
         var variableCats = categories.Where(c => c is { IsAllocation: true, Group: CategoryGroup.Variable }).OrderBy(c => c.Order).ToList();
         var potCats = categories.Where(c => c.Group == CategoryGroup.Pot).OrderBy(c => c.Annual).ThenBy(c => c.Order).ToList();
-        var variableIds = variableCats.Select(c => c.Id).ToHashSet();
 
         var envelopes = variableCats
             .Select(c => new EnvelopeLine(c.Id, c.Label, Math.Max(0, r.Amounts[c.Id]), SpentIn(c.Id)))
             .ToList();
-        var varSpent = variableCats.Sum(c => SpentIn(c.Id));
+        var varSpent = variableIds.Sum(SpentIn);
+        var elsewhere = varSpent - envelopes.Sum(e => e.Spent);
+        if (elsewhere != 0) envelopes.Add(new EnvelopeLine(InactiveEnvelopeId, "Catégories arrêtées ou pas encore créées", 0, elsewhere));
         var varBudget = r.VariableTotal;
         var rest = varBudget - varSpent;
 
@@ -113,22 +123,32 @@ public static class PeriodSummaryCalculator
         decimal? perDay = daysLeft > 0 ? Math.Max(0, rest) / daysLeft : null;
         decimal? projection = elapsed > 0 ? varSpent / elapsed * length : null;
 
+        var results = new Dictionary<PeriodKey, BudgetResult>();
+        BudgetResult ResultAt(PeriodKey q)
+        {
+            if (!results.TryGetValue(q, out var res)) results[q] = res = BudgetCalculator.Compute(timeline.At(q).Settings, timeline.At(q).Categories);
+            return res;
+        }
+
+        // Solde d'un pot : départ + virements de chaque période depuis la première (au montant en vigueur à cette période) - dépenses.
         var potStartOk = PeriodKey.TryParse(s.PotStart, out var potStart);
+        if (potStartOk && PeriodKey.MonthsBetween(potStart, key) > MaxPotMonths) potStart = key.AddMonths(-MaxPotMonths);
         var pots = potCats.Select(c =>
         {
-            var monthly = BudgetCalculator.MonthlyAmount(c, r);
-            decimal balance;
+            var balance = s.PotOpening.GetValueOrDefault(c.Id);
             if (potStartOk)
             {
-                var n = Math.Max(0, PeriodKey.MonthsBetween(potStart, key) + 1);
-                var spent = entries
+                for (var q = potStart; q <= key; q = q.AddMonths(1))
+                {
+                    var cq = timeline.At(q).Categories.FirstOrDefault(x => x.Id == c.Id);
+                    if (cq is not null) balance += BudgetCalculator.MonthlyAmount(cq, ResultAt(q));
+                }
+                balance -= entries
                     .Where(e => e.CategoryId == c.Id)
                     .Where(e => { var k = Periods.KeyFor(e.Date, day); return k >= potStart && k <= key; })
                     .Sum(e => e.Spent);
-                balance = s.PotOpening.GetValueOrDefault(c.Id) + n * monthly - spent;
             }
-            else balance = s.PotOpening.GetValueOrDefault(c.Id);
-            return new PotLine(c.Id, c.Label, monthly, balance, SpentIn(c.Id));
+            return new PotLine(c.Id, c.Label, BudgetCalculator.MonthlyAmount(c, r), balance, SpentIn(c.Id));
         }).ToList();
 
         var daily = new decimal[Math.Max(0, Math.Min(elapsed, length)) + 1];
@@ -149,11 +169,11 @@ public static class PeriodSummaryCalculator
             var a = Periods.Start(k, day);
             var b = Periods.EndExclusive(k, day);
             var v = entries.Where(e => e.Date >= a && e.Date < b && variableIds.Contains(e.CategoryId)).Sum(e => e.Spent);
-            history.Add(new HistoryPoint(k.ToString(), Periods.Label(k, day), k.Month, v));
+            history.Add(new HistoryPoint(k.ToString(), Periods.Label(k, day), k.Month, v, ResultAt(k).VariableTotal));
         }
 
         var fixedLines = categories
-            .Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0 && !(c.Id == BudgetCalculator.ArkeaId && s.ArkeaSettled))
+            .Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0)
             .OrderBy(c => c.Order)
             .Select(c =>
             {

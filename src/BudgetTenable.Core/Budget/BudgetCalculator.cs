@@ -24,11 +24,12 @@ public sealed record BudgetResult(
     public decimal LddsTransfer => PotsTotal + MandatoryProvisions;
 }
 
-/// <summary>Port de la fonction <c>compute()</c> du prototype, sans arrondi intermédiaire.</summary>
+/// <summary>
+/// Port de la fonction <c>compute()</c> du prototype, sans arrondi intermédiaire.
+/// <paramref name="categories"/> ne contient que les catégories actives à la période calculée.
+/// </summary>
 public static class BudgetCalculator
 {
-    public const string ArkeaId = "arkea";
-
     public static BudgetResult Compute(BudgetSettings s, IReadOnlyCollection<Category> categories)
     {
         var income = s.Income.Total;
@@ -37,7 +38,7 @@ public static class BudgetCalculator
         foreach (var c in categories)
         {
             if (c.Group == CategoryGroup.Fixe)
-                fixedMonthly += c.Id == ArkeaId && s.ArkeaSettled ? 0 : c.Amount;
+                fixedMonthly += c.Amount;
             else if (c.Group == CategoryGroup.Pot && c.Annual)
                 mandatory += c.Amount / 12m;
         }

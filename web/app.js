@@ -72,15 +72,19 @@
   let TRITOTAL = 0;
   let RULES = [];
   let editTx = null, pendDel = null, msgT = 0;
+  let BP = '';           // période dont on affiche et modifie le budget (yyyy-MM)
+  let LATER = [];        // changements déjà prévus après BP
+  let PROPAGATE = false; // appliquer aussi aux périodes suivantes
 
   const INC = [
     { k: 'net', label: 'Ton net de base', note: 'Hors primes' },
     { k: 'partner', label: 'Part du/de la partenaire', note: 'Versée chaque mois' },
     { k: 'caf', label: 'CAF' },
   ];
-  const fixCats = () => CATS.filter((c) => c.group === 'fixe');
-  const annualCats = () => CATS.filter((c) => c.annual);
-  const allocCats = () => CATS.filter((c) => c.group === 'variable' || (c.group === 'pot' && !c.annual));
+  // Les catégories actives à la période du budget affiché (BP) ; CATS contient aussi celles arrêtées ou pas encore créées.
+  const fixCats = () => CATS.filter((c) => c.active && c.group === 'fixe');
+  const annualCats = () => CATS.filter((c) => c.active && c.annual);
+  const allocCats = () => CATS.filter((c) => c.active && (c.group === 'variable' || (c.group === 'pot' && !c.annual)));
   const catById = (id) => CATS.find((c) => c.id === id);
   const catLabel = (id) => (catById(id) ? catById(id).label : id || '');
 
@@ -107,11 +111,16 @@
     if (!dirty) return Promise.resolve();
     dirty = false;
     const body = {
+      period: BP,
+      propagate: PROPAGATE,
       settings: S,
-      categories: CATS.map((c) => ({ id: c.id, percentage: c.percentage, amount: c.amount, accountId: c.accountId || null })),
+      categories: CATS.filter((c) => c.active).map((c) => ({ id: c.id, percentage: c.percentage, amount: c.amount, accountId: c.accountId || null })),
     };
     inflight = api('/budget', { method: 'PUT', json: body })
-      .then(() => { if (!dirty) setSync('ok', 'Synchronisé'); })
+      .then(() => {
+        if (PROPAGATE && LATER.length) { LATER = []; PROPAGATE = false; renderLater(); }
+        if (!dirty) setSync('ok', 'Synchronisé');
+      })
       .catch((e) => { dirty = true; setSync('bad', e.status === 0 ? 'Hors ligne' : 'Non enregistré'); })
       .finally(() => { inflight = null; });
     return inflight;
@@ -120,16 +129,17 @@
   const flushSave = () => (dirty || inflight ? doSave() : Promise.resolve());
 
   /* ================= Onglet Budget (calculs locaux, pour la simulation instantanée) ================= */
-  function compute() {
+  function compute(extra) {
     const inc = S.income.net + S.income.partner + S.income.caf;
+    const act = CATS.filter((c) => c.active).concat(extra || []);
     let fixedMonthly = 0, mandProv = 0;
-    CATS.forEach((c) => {
-      if (c.group === 'fixe') fixedMonthly += (c.id === 'arkea' && S.arkeaSettled) ? 0 : c.amount;
+    act.forEach((c) => {
+      if (c.group === 'fixe') fixedMonthly += c.amount;
       else if (c.annual) mandProv += c.amount / 12;
     });
     const fixedTotal = fixedMonthly + mandProv;
     const env = inc - fixedTotal;
-    const alloc = allocCats();
+    const alloc = act.filter((c) => c.group === 'variable' || (c.group === 'pot' && !c.annual));
     const allocPct = sum(alloc.map((c) => c.percentage));
     const savePct = 100 - allocPct;
     const amt = {};
@@ -173,13 +183,11 @@
     INC.forEach((x) => { $('inc-' + x.k).value = S.income[x.k]; });
     fixCats().concat(annualCats()).forEach((c) => {
       const inp = $('fx-' + c.id);
-      inp.disabled = c.id === 'arkea' && S.arkeaSettled;
-      inp.value = inp.disabled ? 0 : c.amount;
+      inp.value = c.amount;
       const acc = document.querySelector('[data-acc="' + c.id + '"]');
       if (acc) acc.value = c.accountId ? String(c.accountId) : '';
     });
     $('primes').value = S.annualBonus;
-    $('arkea').checked = S.arkeaSettled;
     $('incPrimes').checked = S.includeBonus;
   }
 
@@ -188,7 +196,8 @@
     let h = '<thead><tr><th>Poste</th><th class="r">Part</th><th class="r">Par mois</th><th class="r">Rythme</th><th class="r">Aujourd&rsquo;hui</th><th class="r">Écart</th><th>Cible et aujourd&rsquo;hui</th></tr></thead><tbody>';
     let cur = '';
     const subRow = (g) => '<tr class="sub"><td>Sous-total ' + (g === 'variable' ? 'Variable mensuel' : 'Pots de provisions') + '</td><td class="n r" id="sp-' + g + '"></td><td class="n r" id="sa-' + g + '"></td><td class="n r mut" id="sr-' + g + '"></td><td class="n r mut" id="st-' + g + '"></td><td class="n r" id="sg-' + g + '"></td><td></td></tr>';
-    allocCats().forEach((a) => {
+    // Variables d'abord, puis pots, quel que soit l'ordre de création : un seul bloc par type.
+    allocCats().slice().sort((a, b) => (a.group === b.group ? a.order - b.order : a.group === 'variable' ? -1 : 1)).forEach((a) => {
       if (a.group !== cur) {
         if (cur) h += subRow(cur);
         cur = a.group;
@@ -361,23 +370,25 @@
   const currentKey = () => pkeyOf(TODAY);
   const defaultDate = () => (M === currentKey() ? TODAY : sstr(M));
 
-  function catOptionsHtml() {
+  /** Les catégories qui existent aujourd'hui ; avec <paramref name="all"/>, les arrêtées aussi (filtre du journal). */
+  function catOptionsHtml(all) {
     return GROUPS.map(([g, label]) => {
-      const rows = CATS.filter((c) => c.group === g);
-      return rows.length ? '<optgroup label="' + esc(label) + '">' + rows.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>').join('') + '</optgroup>' : '';
+      const rows = CATS.filter((c) => c.group === g && (all || c.activeNow));
+      return rows.length ? '<optgroup label="' + esc(label) + '">' + rows.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.label) + (c.activeNow ? '' : ' (arrêtée)') + '</option>').join('') + '</optgroup>' : '';
     }).join('');
   }
 
   function buildSelects() {
     const opts = catOptionsHtml();
     $('xCat').innerHTML = opts;
-    $('jCat').innerHTML = '<option value="">Toutes les catégories</option><option value="__none">À trier</option>' + opts;
+    $('jCat').innerHTML = '<option value="">Toutes les catégories</option><option value="__none">À trier</option>' + catOptionsHtml(true);
     $('rCat').innerHTML = '<option value="__internal">Virement interne (ignoré du budget)</option>' + opts;
     const accs = ACCOUNTS.map((a) => '<option value="' + a.id + '">' + esc(a.label) + '</option>').join('');
     $('xAcc').innerHTML = accs;
+    $('ncAcc').innerHTML = '<option value="">Compte par défaut (' + esc((ACCOUNTS[0] || { label: 'Perso' }).label) + ')</option>' + accs;
     $('impAcc').innerHTML = accs;
     $('pasteAcc').innerHTML = accs;
-    $('potOpen').innerHTML = CATS.filter((c) => c.group === 'pot').map((c) =>
+    $('potOpen').innerHTML = CATS.filter((c) => c.group === 'pot' && c.activeNow).map((c) =>
       '<div class="field"><label for="open-' + esc(c.id) + '">' + esc(c.label) + '<small>Solde au premier mois</small></label><div class="inp"><input id="open-' + esc(c.id) + '" data-open="' + esc(c.id) + '" type="number" inputmode="decimal" step="10"><span>&euro;</span></div></div>').join('');
   }
 
@@ -385,7 +396,7 @@
     $('potStart').value = S.potStart;
     const pd = $('pDay');
     if (document.activeElement !== pd) pd.value = S.startDay;
-    CATS.filter((c) => c.group === 'pot').forEach((c) => {
+    CATS.filter((c) => c.group === 'pot' && c.activeNow).forEach((c) => {
       const i = $('open-' + c.id);
       if (i && document.activeElement !== i) i.value = S.potOpening[c.id] || 0;
     });
@@ -450,8 +461,8 @@
   function histChart(sm) {
     const host = $('histChart');
     const W = Math.max(300, host.clientWidth || 600), H = 210, m = { l: 58, r: 16, t: 22, b: 30 };
-    const hist = sm.history, bud = sm.variableBudget;
-    const mx = Math.max(bud, Math.max.apply(null, hist.map((h) => h.spent))) * 1.08;
+    const hist = sm.history;
+    const mx = Math.max(Math.max.apply(null, hist.map((h) => h.budget)), Math.max.apply(null, hist.map((h) => h.spent))) * 1.08;
     const tk = niceTicks(mx || 1);
     const YY = (v) => m.t + (H - m.t - m.b) * (1 - v / tk.top);
     const band = (W - m.l - m.r) / hist.length, bw = Math.min(54, band * 0.55);
@@ -463,13 +474,13 @@
     hist.forEach((h, j) => {
       const cx = m.l + band * (j + 0.5), val = h.spent, hh = YY(0) - YY(val);
       if (val > 0) {
-        s += '<rect x="' + (cx - bw / 2) + '" y="' + YY(val) + '" width="' + bw + '" height="' + Math.max(1, hh) + '" rx="3" style="fill:var(' + (val > bud ? '--bad' : '--c-var') + ')"><title>' + esc(h.label) + ' : ' + f(val) + '</title></rect>' +
+        s += '<rect x="' + (cx - bw / 2) + '" y="' + YY(val) + '" width="' + bw + '" height="' + Math.max(1, hh) + '" rx="3" style="fill:var(' + (val > h.budget ? '--bad' : '--c-var') + ')"><title>' + esc(h.label) + ' : ' + f(val) + '</title></rect>' +
           '<text x="' + cx + '" y="' + (YY(val) - 6) + '" text-anchor="middle" style="fill:var(--fg);font-family:var(--font-num);font-size:11px;font-weight:600">' + kfmt(val) + '</text>';
       }
+      s += '<line x1="' + (cx - bw / 2 - 5) + '" x2="' + (cx + bw / 2 + 5) + '" y1="' + YY(h.budget) + '" y2="' + YY(h.budget) + '" style="stroke:var(--muted)" stroke-width="2" stroke-dasharray="4 3"><title>Enveloppe de la période : ' + f(h.budget) + '</title></line>';
       const cur = h.key === sm.key;
       s += '<text x="' + cx + '" y="' + (H - 9) + '" text-anchor="middle" style="fill:var(' + (cur ? '--fg' : '--muted') + ');font-family:var(--font-ui);font-size:11px;font-weight:' + (cur ? 700 : 500) + '">' + MSH[h.monthIndex - 1] + '</text>';
     });
-    s += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + YY(bud) + '" y2="' + YY(bud) + '" style="stroke:var(--muted)" stroke-width="2" stroke-dasharray="5 4"/>';
     host.innerHTML = s + '</svg>';
   }
 
@@ -629,6 +640,8 @@
     editTx = t;
     $('xAmt').value = String(Math.abs(t.amount)).replace('.', ',');
     $('xRef').checked = t.amount > 0;
+    if (t.categoryId && !$('xCat').querySelector('option[value="' + t.categoryId + '"]'))
+      $('xCat').insertAdjacentHTML('beforeend', '<option value="' + esc(t.categoryId) + '">' + esc(catLabel(t.categoryId)) + ' (arrêtée)</option>');
     $('xCat').value = t.categoryId || $('xCat').options[0].value;
     $('xDate').value = t.date;
     $('xAcc').value = String(t.accountId);
@@ -772,9 +785,7 @@
 
   async function refreshBudget() {
     await flushSave();
-    const b = await api('/budget');
-    S = b.settings; CATS = b.categories;
-    buildInputs(); buildTable(); fillInputs(); buildSelects(); fillPot();
+    applyBudget(await api('/budget?period=' + BP));
   }
 
   function pasteMsg(t, err) { const m = $('pasteMsg'); m.textContent = t || ''; m.className = 'msg' + (err ? ' err' : ''); }
@@ -790,7 +801,7 @@
         accountId: r.accountId,
         ignored: r.ignored,
         bank: r.bankCategories.filter((b) => !b.known).map((b) => ({
-          key: b.key, label: b.label, count: b.count, choice: b.matchingCategoryId || '', newLabel: b.label, newGroup: 'variable', remember: true,
+          key: b.key, label: b.label, count: b.count, choice: b.matchingCategoryId || '', newLabel: b.label, newGroup: 'variable', newValue: '', newAccount: '', remember: true,
         })),
         items: r.items.map((i) => ({
           i: i, include: i.kind !== 'duplicate', action: i.kind === 'reconcile' && !i.ambiguous ? 'reconcile' : 'add',
@@ -838,7 +849,9 @@
           '<select class="ctl" data-bk="' + esc(b.key) + '" aria-label="Catégorie pour ' + esc(b.label) + '">' + opts.replace('value="' + b.choice + '"', 'value="' + b.choice + '" selected') + '</select>';
         if (b.choice === '__create') {
           h += '<div class="sub2"><input class="ctl" data-bknew="' + esc(b.key) + '" value="' + esc(b.newLabel) + '" maxlength="120" aria-label="Nom de la nouvelle catégorie">' +
-            '<select class="ctl" data-bkgroup="' + esc(b.key) + '" aria-label="Type de la nouvelle catégorie">' + BK_GROUPS.map((g) => '<option value="' + g[0] + '"' + (g[0] === b.newGroup ? ' selected' : '') + '>' + g[1] + '</option>').join('') + '</select></div>';
+            '<select class="ctl" data-bkgroup="' + esc(b.key) + '" aria-label="Type de la nouvelle catégorie">' + BK_GROUPS.map((g) => '<option value="' + g[0] + '"' + (g[0] === b.newGroup ? ' selected' : '') + '>' + g[1] + '</option>').join('') + '</select>' +
+            (b.newGroup === 'ignore' ? '' : '<input class="ctl" data-bkval="' + esc(b.key) + '" value="' + esc(b.newValue) + '" inputmode="decimal" placeholder="' + (b.newGroup === 'fixe' ? 'Montant mensuel (€)' : 'Part de l’enveloppe (%)') + '" aria-label="' + (b.newGroup === 'fixe' ? 'Montant mensuel' : 'Part de l’enveloppe') + '">') +
+            (b.newGroup === 'fixe' ? '<select class="ctl" data-bkacc="' + esc(b.key) + '" aria-label="Compte de prélèvement"><option value="">Compte par défaut</option>' + ACCOUNTS.map((a) => '<option value="' + a.id + '"' + (String(a.id) === b.newAccount ? ' selected' : '') + '>' + esc(a.label) + '</option>').join('') + '</select>' : '') + '</div>';
         }
         if (b.choice !== '') h += '<label class="chk sub2" for="rem-' + esc(b.key) + '"><input type="checkbox" id="rem-' + esc(b.key) + '" data-bkrem="' + esc(b.key) + '"' + (b.remember ? ' checked' : '') + '><span>Retenir pour la suite</span></label>';
         h += '</div>';
@@ -881,7 +894,14 @@
 
     const body = {
       accountId: PV.accountId,
-      newCategories: PV.bank.filter((b) => b.choice === '__create' && used.has(b.key)).map((b) => ({ key: b.key, label: b.newLabel.trim(), group: b.newGroup })),
+      newCategories: PV.bank.filter((b) => b.choice === '__create' && used.has(b.key)).map((b) => {
+        const v = parseAmt(b.newValue), val = isFinite(v) && v > 0 ? v : 0;
+        return {
+          key: b.key, label: b.newLabel.trim(), group: b.newGroup,
+          amount: b.newGroup === 'fixe' ? val : null, percentage: b.newGroup === 'variable' || b.newGroup === 'pot' ? val : null,
+          accountId: b.newGroup === 'fixe' && b.newAccount ? +b.newAccount : null,
+        };
+      }),
       mappings: PV.bank.filter((b) => b.choice !== '' && b.remember).map((b) => ({
         bankCategory: b.label, ignore: b.choice === '__ignore',
         categoryId: b.choice === '__create' || b.choice === '__ignore' ? null : b.choice, newCategoryKey: b.choice === '__create' ? b.key : null,
@@ -918,7 +938,9 @@
     const t = e.target, d = t.dataset;
     if (d.bk !== undefined) { const b = PV.bank.find((x) => x.key === d.bk); b.choice = t.value; applyBankChoice(b.key); renderPaste(); }
     else if (d.bknew !== undefined) { PV.bank.find((x) => x.key === d.bknew).newLabel = t.value; if (e.type === 'change') renderPaste(); }
-    else if (d.bkgroup !== undefined) PV.bank.find((x) => x.key === d.bkgroup).newGroup = t.value;
+    else if (d.bkgroup !== undefined) { PV.bank.find((x) => x.key === d.bkgroup).newGroup = t.value; renderPaste(); }
+    else if (d.bkval !== undefined) PV.bank.find((x) => x.key === d.bkval).newValue = t.value;
+    else if (d.bkacc !== undefined) PV.bank.find((x) => x.key === d.bkacc).newAccount = t.value;
     else if (d.bkrem !== undefined) PV.bank.find((x) => x.key === d.bkrem).remember = t.checked;
     else if (d.pvinc !== undefined) { PV.items[+d.pvinc].include = t.checked; renderPaste(); }
     else if (d.pvcat !== undefined) { const it = PV.items[+d.pvcat]; it.cat = t.value; it.override = true; }
@@ -1034,7 +1056,7 @@
     else if (t.id === 'potStart') { if (!/^\d{4}-\d{2}$/.test(t.value)) return; S.potStart = t.value; }
     else if (t.id === 'lddsDone') { if (t.checked) S.lddsDone[M] = true; else delete S.lddsDone[M]; }
     else if (t.id === 'primes') S.annualBonus = clampMoney();
-    else if (t.id === 'arkea') { S.arkeaSettled = t.checked; fillInputs(); }
+    else if (t.id === 'bPropagate') { PROPAGATE = t.checked; }
     else if (t.id === 'incPrimes') S.includeBonus = t.checked;
     else return;
     scheduleSave();
@@ -1049,13 +1071,189 @@
   }
 
   async function resetBudget() {
-    if (!window.confirm('Revenir aux montants et aux pourcentages de départ ? Le réglage des pots et les virements cochés sont conservés.')) return;
+    if (!window.confirm('Revenir aux montants et aux pourcentages de départ à partir de ' + periodLabel(BP) + ' ? Les périodes d’avant, le réglage des pots et les virements cochés ne changent pas.')) return;
     try {
       await flushSave();
-      const b = await api('/budget/reset', { method: 'POST' });
-      S = b.settings; CATS = b.categories;
-      fillInputs(); renderBudget();
+      applyBudget(await api('/budget/reset', { method: 'POST', json: { period: BP } }));
     } catch (e) { setSync('bad', 'Non enregistré'); }
+  }
+
+
+  /* ================= Budget par période : navigation, ajout et gestion des catégories ================= */
+  function periodLabel(key) {
+    const day = (S && S.startDay) || 1, p = key.split('-');
+    const a = new Date(+p[0], +p[1] - 1, day), e = new Date(+p[0], +p[1], day - 1);
+    return a.getDate() + ' ' + MSH[a.getMonth()] + ' → ' + e.getDate() + ' ' + MSH[e.getMonth()] + ' ' + e.getFullYear();
+  }
+
+  /** Affiche le budget reçu du serveur (valeurs en vigueur à la période BP) et reconstruit tout ce qui en dépend. */
+  function applyBudget(b) {
+    S = b.settings; CATS = b.categories; BP = b.period; LATER = b.laterChanges || []; PROPAGATE = false;
+    buildInputs(); buildTable(); fillInputs(); buildSelects(); fillPot();
+    renderBudgetBar(); renderLater(); renderManage(); syncAddForm();
+    if (tab === 'budget') renderBudget();
+  }
+
+  function renderBudgetBar() {
+    const cur = currentKey();
+    $('bLabel').textContent = periodLabel(BP);
+    $('bToday').disabled = BP === cur;
+    $('bNote').textContent = BP < cur
+      ? 'Période passée. Tes modifications valent à partir d’ici et corrigent l’historique, jusqu’à un changement déjà prévu.'
+      : BP === cur
+        ? 'Période en cours. Tes modifications valent pour ce mois-ci et les suivants ; les périodes d’avant gardent leurs valeurs.'
+        : 'Période à venir. Tes modifications valent à partir d’ici ; ce mois-ci ne change pas.';
+  }
+
+  function renderLater() {
+    const box = $('bLater');
+    if (!LATER.length) { box.hidden = true; box.innerHTML = ''; return; }
+    const first = LATER[0].from;
+    const names = Array.from(new Set(LATER.map((l) => (l.kind === 'income' ? 'Revenus' : catLabel(l.categoryId))))).map(esc).join(', ');
+    box.hidden = false;
+    box.innerHTML = '<div><strong>Des changements sont déjà prévus</strong> à partir de ' + esc(periodLabel(first)) + ' pour : ' + names + '. Tes modifications ne s’appliqueront pas au-delà de cette date.</div>' +
+      '<label class="chk" for="bPropagate"><input type="checkbox" id="bPropagate"><span>Les appliquer aussi aux périodes suivantes<small>Remplace ces changements prévus.</small></span></label>';
+  }
+
+  /** Recharge le budget affiché (compteurs d'opérations, catégories créées ailleurs) sans changer de période. */
+  async function refreshBudgetData() {
+    try { await flushSave(); applyBudget(await api('/budget?period=' + BP)); } catch (e) { /* l'écran garde ses valeurs */ }
+  }
+
+  async function gotoBudgetPeriod(key) {
+    await flushSave();
+    try { applyBudget(await api('/budget?period=' + key)); } catch (e) { setSync('bad', e.message); }
+  }
+
+  /* ---- ajout ---- */
+  const NC = { fixe: ['Montant mensuel', '€'], variable: ['Part de l’enveloppe', '%'], pot: ['Part de l’enveloppe', '%'], annual: ['Montant annuel', '€/an'], ignore: null };
+
+  function newCatDraft() {
+    const type = $('ncType').value, v = parseAmt($('ncVal').value), val = isFinite(v) && v > 0 ? v : 0;
+    return {
+      id: '__new', group: type === 'annual' ? 'pot' : type, annual: type === 'annual', active: true, currentAverage: 0,
+      percentage: type === 'variable' || type === 'pot' ? Math.min(100, val) : 0, amount: type === 'fixe' || type === 'annual' ? val : 0,
+    };
+  }
+
+  function syncAddForm() {
+    if (!$('ncType')) return;
+    const type = $('ncType').value, meta = NC[type];
+    $('ncValWrap').hidden = !meta;
+    if (meta) { $('ncValLabel').textContent = meta[0]; $('ncUnit').textContent = meta[1]; }
+    $('ncAccWrap').hidden = type !== 'fixe';
+    $('ncOpenWrap').hidden = type !== 'pot';
+    renderImpact();
+  }
+
+  function renderImpact() {
+    const box = $('ncImpact');
+    if (!S) return;
+    const type = $('ncType').value;
+    if (type === 'ignore') { box.innerHTML = 'Une catégorie « hors budget » ne change ni l’enveloppe ni l’épargne.'; return; }
+    const a = compute(), b = compute([newCatDraft()]);
+    const delta = (x, y) => (Math.abs(x - y) < 0.5 ? '<b>' + f(x) + '</b> (inchangé)' : '<b>' + f(x) + '</b> → <b' + (y < 0 ? ' class="neg"' : '') + '>' + f(y) + '</b>');
+    let h = '<div>Sur ' + esc(periodLabel(BP)) + ' : enveloppe ' + delta(a.env, b.env) + ' · budget variable ' + delta(a.varTotal, b.varTotal) + '</div>' +
+      '<div>Épargne courante ' + delta(a.saveAmt, b.saveAmt) + ' (' + pc(a.savePct) + ' → ' + pc(b.savePct) + ')</div>';
+    if (b.savePct < 0 || b.env <= 0) h += '<div class="neg"><b>Le budget devient déficitaire.</b></div>';
+    box.innerHTML = h;
+  }
+
+  async function submitNewCat(ev) {
+    ev.preventDefault();
+    const msg = $('ncMsg'), type = $('ncType').value, d = newCatDraft();
+    const num = (id) => { const v = parseAmt($(id).value); return isFinite(v) && v > 0 ? v : 0; };
+    const body = {
+      label: $('ncLabel').value.trim(), group: d.group, annual: d.annual, from: BP, note: $('ncNote').value.trim() || null,
+      percentage: d.percentage, amount: d.amount, accountId: type === 'fixe' && $('ncAcc').value ? +$('ncAcc').value : null,
+      opening: type === 'pot' ? num('ncOpen') : null,
+    };
+    $('ncGo').disabled = true;
+    msg.className = 'msg'; msg.textContent = '';
+    try {
+      await flushSave();
+      await api('/categories', { method: 'POST', json: body });
+      $('catForm').reset();
+      applyBudget(await api('/budget?period=' + BP));
+      msg.textContent = '« ' + body.label + ' » ajoutée à partir de ' + periodLabel(BP) + '.';
+    } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; }
+    finally { $('ncGo').disabled = false; }
+  }
+
+  /* ---- gestion ---- */
+  function renderManage() {
+    const mg = $('mgMsg'); if (mg) mg.textContent = '';
+    let h = '';
+    GROUPS.forEach(([g, label]) => {
+      const rows = CATS.filter((c) => c.group === g);
+      if (!rows.length) return;
+      h += '<h3 class="gh sp">' + esc(label) + '</h3>';
+      h += rows.map((c) => {
+        const bits = [];
+        if (c.group === 'fixe') bits.push(f(c.amount) + ' / mois');
+        else if (c.annual) bits.push(f(c.amount) + ' / an');
+        else if (c.group !== 'ignore') bits.push(pc(c.percentage) + ' de l’enveloppe');
+        if (!c.active) bits.push(c.endedFrom ? 'arrêtée à partir de ' + periodLabel(c.endedFrom) : 'existe à partir de ' + periodLabel(c.activeFrom));
+        else if (c.activeFrom) bits.push('créée à partir de ' + periodLabel(c.activeFrom));
+        bits.push(c.usedBy + ' opération' + (c.usedBy > 1 ? 's' : ''));
+        const btn = (act, text, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" type="button" data-mg="' + act + '" data-id="' + esc(c.id) + '">' + text + '</button>';
+        const acts = btn('rename', 'Renommer') + btn('merge', 'Fusionner') +
+          (c.active ? btn('stop', 'Arrêter') : c.endedFrom ? btn('restore', 'Réactiver') : '') +
+          (c.usedBy === 0 ? btn('delete', 'Supprimer', 'danger') : '');
+        return '<div class="mg' + (c.active ? '' : ' off') + '"><div class="nm"><b>' + esc(c.label) + '</b><span>' + bits.map(esc).join(' &middot; ') + '</span></div><span class="acts">' + acts + '</span></div>';
+      }).join('');
+    });
+    $('manageList').innerHTML = h;
+  }
+
+  async function onManageClick(ev) {
+    const b = ev.target.closest('[data-mg]');
+    if (!b) return;
+    const c = catById(b.dataset.id), act = b.dataset.mg, msg = $('mgMsg');
+    if (!c) return;
+    const run = async (fn, ok) => {
+      msg.className = 'msg';
+      try { await flushSave(); await fn(); applyBudget(await api('/budget?period=' + BP)); refreshUnsorted(); msg.textContent = ok; }
+      catch (e) { msg.className = 'msg err'; msg.textContent = e.message; }
+    };
+    if (act === 'rename') {
+      const name = window.prompt('Nouveau nom de la catégorie', c.label);
+      if (name && name.trim() && name.trim() !== c.label) await run(() => api('/categories/' + encodeURIComponent(c.id), { method: 'PUT', json: { label: name.trim() } }), 'Catégorie renommée.');
+    } else if (act === 'stop') {
+      const extra = c.group === 'pot' ? ' Son solde ne sera plus suivi : fusionne-la plutôt dans un autre pot pour le garder.' : '';
+      if (window.confirm('Arrêter « ' + c.label + ' » à partir de ' + periodLabel(BP) + ' ? Les périodes d’avant la gardent.' + extra))
+        await run(() => api('/categories/' + encodeURIComponent(c.id) + '/archive', { method: 'POST', json: { from: BP } }), '« ' + c.label + ' » arrêtée à partir de ' + periodLabel(BP) + '.');
+    } else if (act === 'restore') {
+      await run(() => api('/categories/' + encodeURIComponent(c.id) + '/restore', { method: 'POST', json: { from: BP } }), '« ' + c.label + ' » réactivée à partir de ' + periodLabel(BP) + '.');
+    } else if (act === 'delete') {
+      if (window.confirm('Supprimer définitivement « ' + c.label + ' » ?')) await run(() => api('/categories/' + encodeURIComponent(c.id), { method: 'DELETE' }), 'Catégorie supprimée.');
+    } else if (act === 'merge') openMerge(c);
+  }
+
+  function openMerge(c) {
+    const others = CATS.filter((x) => x.id !== c.id);
+    $('mergeTitle').textContent = 'Fusionner « ' + c.label + ' »';
+    $('mergeText').textContent = c.usedBy + ' opération' + (c.usedBy > 1 ? 's' : '') + ', ses règles et ses correspondances bancaires passeront dans la catégorie choisie. « ' + c.label + ' » disparaîtra. Les opérations comptent ensuite selon la catégorie choisie, y compris dans l’historique.';
+    $('mergeInto').innerHTML = GROUPS.map(([g, label]) => {
+      const rows = others.filter((x) => x.group === g);
+      return rows.length ? '<optgroup label="' + esc(label) + '">' + rows.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.label) + (x.active ? '' : ' (arrêtée)') + '</option>').join('') + '</optgroup>' : '';
+    }).join('');
+    $('mergeDlg').dataset.id = c.id;
+    $('mergeDlg').showModal();
+  }
+
+  async function onMergeClose() {
+    const dlg = $('mergeDlg');
+    if (dlg.returnValue !== 'ok') return;
+    const id = dlg.dataset.id, into = $('mergeInto').value, msg = $('mgMsg');
+    try {
+      await flushSave();
+      const r = await api('/categories/' + encodeURIComponent(id) + '/merge', { method: 'POST', json: { intoId: into } });
+      applyBudget(await api('/budget?period=' + BP));
+      refreshUnsorted();
+      msg.className = 'msg';
+      msg.textContent = 'Fusionnée : ' + r.moved + ' opération' + (r.moved > 1 ? 's' : '') + ' déplacée' + (r.moved > 1 ? 's' : '') + ' dans « ' + catLabel(into) + ' ».';
+    } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; }
   }
 
   /* ================= Connexion et navigation ================= */
@@ -1097,7 +1295,7 @@
     });
     $('budgetActions').hidden = h !== 'budget';
     $('eyebrow').textContent = EYEBROW[h];
-    if (h === 'budget') renderBudget();
+    if (h === 'budget') { renderBudget(); refreshBudgetData(); }
     else if (h === 'suivi') flushSave().then(loadSuivi);
     else if (h === 'tri') loadTri();
     else if (h === 'regles') loadRules();
@@ -1105,9 +1303,9 @@
 
   async function loadAll() {
     const b = await api('/budget');
-    S = b.settings; CATS = b.categories; TODAY = b.today; M = b.currentPeriod;
+    TODAY = b.today; M = b.currentPeriod;
     ACCOUNTS = await api('/accounts');
-    buildInputs(); buildTable(); fillInputs(); buildSelects();
+    applyBudget(b);
     $('xDate').value = defaultDate();
     authed = true;
     $('login').hidden = true;
@@ -1153,10 +1351,17 @@
     if (b) classify(+b.dataset.id, null, true);
   });
   $('ruleList').addEventListener('click', onRuleClick);
+  $('bPrev').addEventListener('click', () => gotoBudgetPeriod(mshift(BP, -1)));
+  $('bNext').addEventListener('click', () => gotoBudgetPeriod(mshift(BP, 1)));
+  $('bToday').addEventListener('click', () => gotoBudgetPeriod(currentKey()));
+  $('catForm').addEventListener('submit', submitNewCat);
+  ['ncType', 'ncVal'].forEach((id) => $(id).addEventListener('input', syncAddForm));
+  $('manageList').addEventListener('click', onManageClick);
+  $('mergeDlg').addEventListener('close', onMergeClose);
   $('pasteGo').addEventListener('click', pasteAnalyze);
   const pv = $('pastePreview');
   pv.addEventListener('change', onPasteInput);
-  pv.addEventListener('input', (e) => { if (e.target.dataset.bknew !== undefined) onPasteInput(e); });
+  pv.addEventListener('input', (e) => { if (e.target.dataset.bknew !== undefined || e.target.dataset.bkval !== undefined) onPasteInput(e); });
   pv.addEventListener('click', (e) => {
     if (e.target.id === 'pvOk') pasteCommit();
     else if (e.target.id === 'pvCancel') { PV = null; renderPaste(); pasteMsg(''); }

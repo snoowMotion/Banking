@@ -11,8 +11,8 @@ public class FixedLinesTests
 {
     private static DateOnly D(string s) => DateOnly.Parse(s);
 
-    private static PeriodSummary Run(IEnumerable<SpendEntry> entries, BudgetSettings? s = null) =>
-        PeriodSummaryCalculator.Calculate(s ?? BudgetDefaults.Settings(), BudgetDefaults.Categories(), entries.ToList(), PeriodKey.Parse("2026-10"), D("2026-11-02"));
+    private static PeriodSummary Run(IEnumerable<SpendEntry> entries) =>
+        PeriodSummaryCalculator.Calculate(BudgetDefaults.Settings(), BudgetDefaults.Categories(), entries.ToList(), PeriodKey.Parse("2026-10"), D("2026-11-02"));
 
     [Fact]
     public void The_seed_has_ten_fixed_charges_all_due_and_the_expected_amounts_sum_to_1396()
@@ -27,9 +27,9 @@ public class FixedLinesTests
     [Fact]
     public void A_settled_credit_is_no_longer_expected()
     {
-        var s = BudgetDefaults.Settings();
-        s.ArkeaSettled = true;
-        var lines = Run(Array.Empty<SpendEntry>(), s).FixedLines;
+        var timeline = new BudgetTimeline(BudgetDefaults.Settings(), BudgetDefaults.Categories(),
+            new[] { new CategoryTerm { CategoryId = "arkea", From = "2026-10", Active = false, Amount = 70 } }, Array.Empty<IncomeTerm>());
+        var lines = PeriodSummaryCalculator.Calculate(timeline, Array.Empty<SpendEntry>(), PeriodKey.Parse("2026-10"), D("2026-11-02")).FixedLines;
         Assert.DoesNotContain(lines, l => l.CategoryId == "arkea");
         Assert.Equal(1326m, lines.Sum(l => l.Expected));
     }
@@ -198,10 +198,7 @@ public class ApiFixedTests
         Assert.Equal(HttpStatusCode.NotFound, (await Pay(c, "inconnue")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Pay(c, "tel", "pas-une-periode")).StatusCode);
 
-        var b = await Json(await c.GetAsync("/api/budget"));
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(b.GetProperty("settings").GetRawText())!;
-        var arkea = new Dictionary<string, object?>(settings.Select(kv => new KeyValuePair<string, object?>(kv.Key, kv.Value))) { ["arkeaSettled"] = true };
-        await Json(await c.PutAsJsonAsync("/api/budget", new { settings = arkea, categories = Array.Empty<object>() }));
+        await Json(await c.PostAsJsonAsync("/api/categories/arkea/archive", new { from = "2026-10" }));
         Assert.Equal(HttpStatusCode.BadRequest, (await Pay(c, "arkea")).StatusCode);        // crédit soldé
         var s = await Json(await c.GetAsync("/api/periods/2026-10"));
         Assert.DoesNotContain(s.GetProperty("fixedLines").EnumerateArray(), l => l.GetProperty("categoryId").GetString() == "arkea");

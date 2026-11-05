@@ -18,11 +18,14 @@ public static class FixedEndpoints
             BudgetStore store, BudgetDbContext db, IClock clock, TimeProvider time, CancellationToken ct) =>
         {
             if (!PeriodKey.TryParse(key, out var k)) return BudgetEndpoints.Bad("Période invalide (AAAA-MM attendu).");
-            var cat = await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == categoryId, ct);
-            if (cat is null) return Results.NotFound();
+            var timeline = await store.LoadTimelineAsync(ct);
             var settings = await store.GetSettingsAsync(ct);
-            if (cat.Group != CategoryGroup.Fixe) return BudgetEndpoints.Bad("Cette catégorie n'est pas une charge fixe.");
-            if (cat.Id == BudgetCalculator.ArkeaId && settings.ArkeaSettled) return BudgetEndpoints.Bad("Cette charge est soldée.");
+            var cat0 = timeline.AllCategories.FirstOrDefault(c => c.Id == categoryId);
+            if (cat0 is null) return Results.NotFound();
+            if (cat0.Group != CategoryGroup.Fixe) return BudgetEndpoints.Bad("Cette catégorie n'est pas une charge fixe.");
+            var state = timeline.StateOf(cat0, k);
+            if (!state.Active) return BudgetEndpoints.Bad("Cette charge est arrêtée (ou n'existe pas encore) sur cette période.");
+            var cat = state.Category;
 
             var start = Periods.Start(k, settings.StartDay);
             var end = Periods.EndExclusive(k, settings.StartDay);

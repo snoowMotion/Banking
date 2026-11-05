@@ -64,9 +64,8 @@ public class CalculatorTests
     [Fact]
     public void Settled_arkea_removes_70_from_fixed_charges()
     {
-        var s = BudgetDefaults.Settings();
-        s.ArkeaSettled = true;
-        var r = BudgetCalculator.Compute(s, BudgetDefaults.Categories());
+        // Une charge arrêtée n'est plus dans les catégories actives de la période.
+        var r = BudgetCalculator.Compute(BudgetDefaults.Settings(), BudgetDefaults.Categories().Where(c => c.Id != "arkea").ToList());
 
         Near(1326m, r.FixedMonthly);
         Near(1519.6666666667m, r.Envelope);

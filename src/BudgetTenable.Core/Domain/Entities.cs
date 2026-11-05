@@ -23,6 +23,8 @@ public class Category
     public int Order { get; set; }
     /// <summary>Compte sur lequel une charge fixe est prélevée ; nul = premier compte. Sert au marquage « payée » par clic.</summary>
     public int? AccountId { get; set; }
+    /// <summary>Première période (yyyy-MM) où la catégorie existe ; nul = depuis toujours. Les valeurs ci-dessus valent dès cette période.</summary>
+    public string? ActiveFrom { get; set; }
 
     public bool IsAllocation => (Group is CategoryGroup.Variable or CategoryGroup.Pot) && !Annual;
 }
@@ -89,4 +91,32 @@ public class BankCategoryMapping
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
     public string? CategoryId { get; set; }
+}
+
+/// <summary>
+/// Changement des paramètres d'une catégorie à partir d'une période : il vaut pour cette période et les suivantes,
+/// jusqu'au changement daté suivant. Les périodes d'avant gardent leurs valeurs.
+/// </summary>
+public class CategoryTerm
+{
+    public int Id { get; set; }
+    public string CategoryId { get; set; } = "";
+    /// <summary>Période de départ (yyyy-MM).</summary>
+    public string From { get; set; } = "";
+    public decimal Percentage { get; set; }
+    public decimal Amount { get; set; }
+    public int? AccountId { get; set; }
+    /// <summary>Faux = catégorie arrêtée (archivée) à partir de cette période.</summary>
+    public bool Active { get; set; } = true;
+}
+
+/// <summary>Changement des revenus à partir d'une période (même principe que <see cref="CategoryTerm"/>).</summary>
+public class IncomeTerm
+{
+    public int Id { get; set; }
+    public string From { get; set; } = "";
+    public decimal Net { get; set; }
+    public decimal Partner { get; set; }
+    public decimal Caf { get; set; }
+    public decimal AnnualBonus { get; set; }
 }

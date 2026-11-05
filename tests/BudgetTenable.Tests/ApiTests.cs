@@ -149,7 +149,7 @@ public class ApiTests
 
                 var put = await c.PutAsJsonAsync("/api/budget", new
                 {
-                    settings = new { income = new { net = 2100, partner = 750, caf = 198 }, annualBonus = 3000, includeBonus = true, arkeaSettled = true, startDay = 1, potStart = "2026-12", potOpening = new { voiture = 200 }, lddsDone = new { } },
+                    settings = new { income = new { net = 2100, partner = 750, caf = 198 }, annualBonus = 3000, includeBonus = false, startDay = 1, potStart = "2026-12", potOpening = new { voiture = 200 }, lddsDone = new { } },
                     categories = new object[] { new { id = "shop", percentage = 12 }, new { id = "immo", amount = 950 } },
                 });
                 var saved = await Json(put);
@@ -161,7 +161,7 @@ public class ApiTests
             var b2 = await Json(await c2.GetAsync("/api/budget"));
             var s = b2.GetProperty("settings");
             Assert.Equal(2100m, s.GetProperty("income").GetProperty("net").GetDecimal());
-            Assert.True(s.GetProperty("arkeaSettled").GetBoolean());
+            Assert.False(s.GetProperty("includeBonus").GetBoolean());
             Assert.Equal(200m, s.GetProperty("potOpening").GetProperty("voiture").GetDecimal());
             var cats = b2.GetProperty("categories").EnumerateArray().ToDictionary(x => x.GetProperty("id").GetString()!);
             Assert.Equal(12m, cats["shop"].GetProperty("percentage").GetDecimal());

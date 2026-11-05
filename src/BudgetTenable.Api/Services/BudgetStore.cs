@@ -28,8 +28,13 @@ public sealed class BudgetStore(BudgetDbContext db)
     public Task<List<Category>> GetCategoriesAsync(CancellationToken ct = default) =>
         db.Categories.AsNoTracking().OrderBy(c => c.Order).ToListAsync(ct);
 
+    /// <summary>Valeurs du budget période par période (réglages, catégories, changements datés).</summary>
+    public async Task<BudgetTimeline> LoadTimelineAsync(CancellationToken ct = default) =>
+        new(await GetSettingsAsync(ct), await GetCategoriesAsync(ct),
+            await db.CategoryTerms.AsNoTracking().ToListAsync(ct), await db.IncomeTerms.AsNoTracking().ToListAsync(ct));
+
     /// <summary>Crée le schéma et les données de départ au premier lancement.</summary>
-    public static async Task InitializeAsync(BudgetDbContext db)
+    public static async Task InitializeAsync(BudgetDbContext db, IClock clock)
     {
         await db.Database.MigrateAsync();
 
@@ -41,6 +46,30 @@ public sealed class BudgetStore(BudgetDbContext db)
         }
         if (!await db.AppSettings.AnyAsync())
             db.AppSettings.Add(new AppSetting { Id = 1, Json = JsonSerializer.Serialize(BudgetDefaults.Settings(), Json) });
+        await db.SaveChangesAsync();
+        await MigrateArkeaFlagAsync(db, clock);
+    }
+
+    /// <summary>
+    /// L'ancienne case « Crédit Arkea soldé » valait pour toutes les périodes. Elle devient un arrêt daté de la charge,
+    /// à partir de la période en cours : l'historique garde la charge.
+    /// </summary>
+    private static async Task MigrateArkeaFlagAsync(BudgetDbContext db, IClock clock)
+    {
+        var row = await db.AppSettings.FirstOrDefaultAsync(x => x.Id == 1);
+        if (row is null) return;
+        using var doc = JsonDocument.Parse(row.Json);
+        if (!doc.RootElement.TryGetProperty("arkeaSettled", out var flag)) return;
+
+        var settings = JsonSerializer.Deserialize<BudgetSettings>(row.Json, Json) ?? BudgetDefaults.Settings();
+        if (flag.ValueKind == JsonValueKind.True)
+        {
+            var from = Periods.KeyFor(clock.Today, settings.StartDay).ToString();
+            var arkea = await db.Categories.FirstOrDefaultAsync(c => c.Id == "arkea");
+            if (arkea is not null && !await db.CategoryTerms.AnyAsync(t => t.CategoryId == "arkea" && t.From == from))
+                db.CategoryTerms.Add(new CategoryTerm { CategoryId = "arkea", From = from, Amount = arkea.Amount, Percentage = arkea.Percentage, AccountId = arkea.AccountId, Active = false });
+        }
+        row.Json = JsonSerializer.Serialize(settings, Json);
         await db.SaveChangesAsync();
     }
 }

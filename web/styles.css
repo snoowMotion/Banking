@@ -244,3 +244,17 @@ button.fx:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .fx .st{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
 .fx .go{font-size:12.5px;font-weight:700;color:var(--accent)}
 .field .ctl.acc{height:28px;font-size:12.5px;margin-top:6px;width:auto;max-width:100%}
+
+/* ===== Gestion des catégories ===== */
+.mg{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.mg .nm{display:grid;min-width:0}
+.mg .nm span{color:var(--muted);font-size:12.5px}
+.mg.off .nm b{color:var(--muted);text-decoration:line-through}
+.mg .acts{flex-wrap:wrap;justify-content:flex-end}
+.gh.sp{margin-top:18px}
+dialog{border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--fg);padding:20px;width:min(440px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(10,14,20,.55)}
+.result .neg{color:var(--bad)}
+@media (max-width:520px){.mg{grid-template-columns:minmax(0,1fr)}.mg .acts{justify-content:flex-start}}
+
+.field>div>label{display:block}
