@@ -227,3 +227,20 @@ body{margin:0}
 .tag.merge{border-color:var(--accent);color:var(--accent)}
 .bankrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:center}
 @media (max-width:520px){.bk{grid-template-columns:minmax(0,1fr)}.pv{grid-template-columns:24px 48px minmax(0,1fr) auto}}
+
+/* ===== Charges fixes ===== */
+.fxsum{margin:0 0 10px;font-size:13.5px}
+.fxsum b{font-family:var(--font-num)}
+.fxlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.fx{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;text-align:left;font:inherit;color:inherit;
+  padding:12px 14px;border:1px solid var(--line-strong);border-radius:10px;background:var(--bg);width:100%}
+button.fx{cursor:pointer}
+button.fx:hover{border-color:var(--accent)}
+button.fx:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.fx.paid{border-color:var(--line)}
+.fx .nm{display:grid;min-width:0}
+.fx .nm b{font-weight:600}
+.fx .nm span{color:var(--muted);font-size:12.5px}
+.fx .st{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.fx .go{font-size:12.5px;font-weight:700;color:var(--accent)}
+.field .ctl.acc{height:28px;font-size:12.5px;margin-top:6px;width:auto;max-width:100%}

@@ -108,7 +108,7 @@
     dirty = false;
     const body = {
       settings: S,
-      categories: CATS.map((c) => ({ id: c.id, percentage: c.percentage, amount: c.amount })),
+      categories: CATS.map((c) => ({ id: c.id, percentage: c.percentage, amount: c.amount, accountId: c.accountId || null })),
     };
     inflight = api('/budget', { method: 'PUT', json: body })
       .then(() => { if (!dirty) setSync('ok', 'Synchronisé'); })
@@ -156,10 +156,12 @@
     });
     const fb = $('fixFields'), pb = $('provFields');
     fb.innerHTML = ''; pb.innerHTML = '';
+    const accOpts = '<option value="">Compte par défaut (' + esc((ACCOUNTS[0] || { label: 'Perso' }).label) + ')</option>' + ACCOUNTS.map((a) => '<option value="' + a.id + '">' + esc(a.label) + '</option>').join('');
     const add = (target, c) => {
       const row = document.createElement('div');
       row.className = 'field';
-      row.innerHTML = '<label for="fx-' + esc(c.id) + '">' + esc(c.label) + (c.note ? '<small>' + esc(c.note) + '</small>' : '') + '</label>' +
+      row.innerHTML = '<div><label for="fx-' + esc(c.id) + '">' + esc(c.label) + (c.note ? '<small>' + esc(c.note) + '</small>' : '') + '</label>' +
+        (c.group === 'fixe' ? '<select class="ctl acc" data-acc="' + esc(c.id) + '" aria-label="Compte de prélèvement de ' + esc(c.label) + '">' + accOpts + '</select>' : '') + '</div>' +
         '<div class="inp"><input id="fx-' + esc(c.id) + '" data-amount="' + esc(c.id) + '" type="number" inputmode="decimal" min="0" step="1"><span>' + (c.annual ? '&euro;/an' : '&euro;') + '</span></div>';
       target.appendChild(row);
     };
@@ -173,6 +175,8 @@
       const inp = $('fx-' + c.id);
       inp.disabled = c.id === 'arkea' && S.arkeaSettled;
       inp.value = inp.disabled ? 0 : c.amount;
+      const acc = document.querySelector('[data-acc="' + c.id + '"]');
+      if (acc) acc.value = c.accountId ? String(c.accountId) : '';
     });
     $('primes').value = S.annualBonus;
     $('arkea').checked = S.arkeaSettled;
@@ -520,6 +524,7 @@
     const paceFrac = sm.isCurrent ? sm.elapsed / D : null;
     $('envList').innerHTML = sm.envelopes.map((e) => envRow(e, paceFrac)).join('');
 
+    renderFixed(sm);
     paceChart(sm);
     histChart(sm);
 
@@ -647,6 +652,48 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch (e) { setMsg(e.message || 'Export impossible.', true); }
+  }
+
+
+  /* ================= Charges fixes de la période ================= */
+  function renderFixed(sm) {
+    const lines = sm.fixedLines || [];
+    const past = sm.isPast, future = !sm.isCurrent && !sm.isPast;
+    const done = lines.filter((l) => l.status !== 'due').length;
+    $('fxSum').innerHTML = lines.length
+      ? '<b>' + done + '</b> sur <b>' + lines.length + '</b> payées · <b>' + f(sum(lines.map((l) => l.paid))) + '</b> sur ' + f(sum(lines.map((l) => l.expected))) + ' prévus'
+      : 'Aucune charge fixe à suivre.';
+    $('fxList').innerHTML = lines.map((l) => {
+      const acc = ACCOUNTS.find((a) => a.id === (l.accountId || (ACCOUNTS[0] || {}).id));
+      const name = '<span class="nm"><b>' + esc(l.label) + '</b><span>' + f(l.expected) + ' prévus' + (acc ? ' · ' + esc(acc.label) : '') + '</span></span>';
+      if (l.status === 'due') {
+        const chip = past ? '<span class="chip bad"><i></i>Non payée</span>' : '<span class="chip"><i></i>' + (future ? 'À venir' : 'À payer') + '</span>';
+        return '<button type="button" class="fx due" data-fxpay="' + esc(l.categoryId) + '" aria-label="Marquer ' + esc(l.label) + ' comme payée">' + name + '<span class="st">' + chip + '<span class="go">Marquer payée</span></span></button>';
+      }
+      const gap = l.paid - l.expected;
+      const chip = l.status === 'gap'
+        ? '<span class="chip warn"><i></i>Payée ' + f2(l.paid) + ' (' + (gap > 0 ? '+' : '−') + f2(Math.abs(gap)) + ')</span>'
+        : '<span class="chip ok"><i></i>Payée' + (l.lastDate ? ' · ' + frDate(l.lastDate) : '') + '</span>';
+      const undo = l.allManual && l.count === 1
+        ? '<button class="btn sm" type="button" data-fxundo="' + esc(l.categoryId) + '">Annuler</button>'
+        : '<span class="mut" style="font-size:12.5px">' + (l.allManual ? l.count + ' opérations' : 'via la banque') + '</span>';
+      return '<div class="fx paid">' + name + '<span class="st">' + chip + undo + '</span></div>';
+    }).join('');
+  }
+
+  async function onFixedClick(e) {
+    const pay = e.target.closest('[data-fxpay]'), undo = e.target.closest('[data-fxundo]');
+    const btn = pay || undo;
+    if (!btn) return;
+    const id = pay ? pay.dataset.fxpay : undo.dataset.fxundo, msg = $('fxMsg');
+    btn.disabled = true;
+    msg.className = 'msg';
+    msg.textContent = '';
+    try {
+      await api('/periods/' + M + '/fixed/' + encodeURIComponent(id) + '/paid', { method: pay ? 'POST' : 'DELETE', json: pay ? {} : undefined });
+      await loadSuivi();
+      msg.textContent = pay ? catLabel(id) + ' marquée payée.' : 'Marquage annulé.';
+    } catch (err) { btn.disabled = false; msg.className = 'msg err'; msg.textContent = err.message; }
   }
 
   /* ================= Onglet À trier ================= */
@@ -803,7 +850,8 @@
       const p = it.i, dup = p.kind === 'duplicate';
       const credit = p.amount > 0;
       const tags = (p.pending ? '<span class="tag pend">en attente</span>' : '') + (dup ? '<span class="tag dup">déjà connue</span>' : '') + (p.kind === 'reconcile' ? '<span class="tag merge">à rapprocher</span>' : '') +
-        (p.suggestionSource === 'rule' ? '<span class="tag">règle</span>' : '');
+        (p.suggestionSource === 'rule' ? '<span class="tag">règle</span>' : '') +
+        (p.suggestionSource === 'fixed' ? '<span class="tag merge" title="Même montant qu’une charge fixe encore à payer">charge fixe ?</span>' : '');
       const sub = [p.detail, p.bankCategory].filter(Boolean).map(esc).join(' &middot; ');
       let row = '<div class="pv' + (it.include ? '' : ' off') + '"><input type="checkbox" data-pvinc="' + idx + '"' + (it.include ? ' checked' : '') + (dup ? ' disabled' : '') + ' aria-label="Inclure ' + esc(p.label) + '">' +
         '<span class="jd num">' + frDate(p.date) + (p.time ? '<br>' + esc(p.time) : '') + '</span>' +
@@ -980,6 +1028,7 @@
     if (t.dataset.inc) S.income[t.dataset.inc] = clampMoney();
     else if (t.dataset.amount) { const c = catById(t.dataset.amount); if (c) c.amount = clampMoney(); }
     else if (t.dataset.pct) { const c = catById(t.dataset.pct); if (c) c.percentage = isFinite(v) ? Math.min(100, Math.max(0, v)) : 0; }
+    else if (t.dataset.acc) { const c = catById(t.dataset.acc); if (c) c.accountId = t.value ? +t.value : null; }
     else if (t.dataset.open) S.potOpening[t.dataset.open] = isFinite(v) ? v : 0;
     else if (t.id === 'pDay') { if (!isFinite(v) || v < 1 || v > 28) return; S.startDay = Math.round(v); M = currentKey(); $('xDate').value = defaultDate(); }
     else if (t.id === 'potStart') { if (!/^\d{4}-\d{2}$/.test(t.value)) return; S.potStart = t.value; }
@@ -1089,6 +1138,7 @@
   $('xForm').addEventListener('submit', submitExp);
   $('xCancel').addEventListener('click', () => { resetForm(true); setMsg(''); $('xDate').value = defaultDate(); });
   $('jList').addEventListener('click', onJournalClick);
+  $('fxList').addEventListener('click', onFixedClick);
   let qT = 0;
   $('jQ').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(loadSuivi, 250); });
   const go = (k) => () => { M = mshift(M, k); pendDel = null; $('xDate').value = defaultDate(); loadSuivi(); };

@@ -30,6 +30,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(x => x.Label).HasMaxLength(120).IsRequired();
             e.Property(x => x.Group).HasConversion<string>().HasMaxLength(12);
             e.Ignore(x => x.IsAllocation);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
         });
 
         b.Entity<Account>(e =>

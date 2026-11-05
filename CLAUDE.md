@@ -10,4 +10,5 @@ Application de budget auto-hébergée (voir `docs/SPEC-budget-sync.md`, la spec,
 - Ne jamais journaliser d'IBAN ni de montants au niveau INFO. Secrets hors dépôt.
 - Migrations : `dotnet-ef migrations add <Nom> --project src/BudgetTenable.Api --output-dir Data/Migrations`.
 - Collage d'opérations : `PastedStatementParser` (Core) + `PasteEndpoints` (aperçu puis validation) ; rapprochement partagé avec l'import CSV/OFX dans `Reconciler`. Les correspondances catégorie bancaire -> catégorie sont dans `BankCategoryMapping`.
+- Charges fixes : une charge est « payée » s'il existe une opération classée dedans dans la période (`FixedLine` dans `PeriodSummary`). Le clic crée une saisie manuelle (`FixedEndpoints`) sur `Category.AccountId` ; le rapprochement la fusionne avec la ligne bancaire collée.
 - État : phase 1 terminée (voir README). Phase 2 = synchronisation Enable Banking, à faire après vérification de leur doc officielle.

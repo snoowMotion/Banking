@@ -89,6 +89,9 @@ public static class Reconciler
             .Where(w => w.Length >= 3 && !Noise.Contains(w))
             .ToHashSet();
 
+    /// <summary>Vrai si les deux textes partagent au moins un mot significatif (CB, VIR, etc. ignorés).</summary>
+    public static bool TextOverlap(string? a, string? b) => Overlaps(Tokens(a), Tokens(b));
+
     private static bool Overlaps(HashSet<string> a, HashSet<string> b) =>
         a.Any(x => b.Any(y => x == y || (Math.Min(x.Length, y.Length) >= 4 && (x.StartsWith(y, StringComparison.Ordinal) || y.StartsWith(x, StringComparison.Ordinal)))));
 }

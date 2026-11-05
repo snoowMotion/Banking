@@ -31,6 +31,7 @@ public static class BudgetEndpoints
             s.Income.Caf = Money(s.Income.Caf);
             s.AnnualBonus = Money(s.AnnualBonus);
 
+            var accountIds = (await db.Accounts.Select(a => a.Id).ToListAsync(ct)).ToHashSet();
             var potIds = cats.Where(c => c.Group == CategoryGroup.Pot).Select(c => c.Id).ToHashSet();
             s.PotOpening = (s.PotOpening ?? new()).Where(kv => potIds.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => Math.Clamp(kv.Value, -10_000_000m, 10_000_000m));
             s.LddsDone = (s.LddsDone ?? new()).Where(kv => kv.Value && PeriodKey.TryParse(kv.Key, out _)).ToDictionary(kv => kv.Key, kv => true);
@@ -46,7 +47,8 @@ public static class BudgetEndpoints
                     c.Label = label;
                 }
                 if (u.Percentage is { } p && c.IsAllocation) c.Percentage = Math.Clamp(p, 0m, 100m);
-                if (u.Amount is { } a && (c.Group == CategoryGroup.Fixe || c.Annual)) c.Amount = Money(a);
+                if (u.Amount is { } a && (c.Group == CategoryGroup.Fixe || c.Annual)) c.Amount = Math.Round(Math.Clamp(a, 0m, 10_000_000m), 2);
+                if (c.Group == CategoryGroup.Fixe) c.AccountId = u.AccountId is { } acc && accountIds.Contains(acc) ? acc : null;
             }
 
             await store.SaveSettingsAsync(s, ct); // enregistre aussi les catégories modifiées (même contexte)
@@ -83,12 +85,12 @@ public static class BudgetEndpoints
             var cats = await store.GetCategoriesAsync(ct);
             var (from, to) = PeriodSummaryCalculator.RequiredWindow(s, k);
 
-            var spendable = cats.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot).Select(c => c.Id).ToHashSet();
+            var spendable = cats.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot or CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
             var rows = await db.Transactions.AsNoTracking()
                 .Where(t => t.CategoryId != null && !t.IsInternalTransfer && t.BookingDate >= from && t.BookingDate < to)
-                .Select(t => new { t.BookingDate, t.CategoryId, t.Amount })
+                .Select(t => new { t.Id, t.BookingDate, t.CategoryId, t.Amount, FromBank = t.ProviderTransactionId != null })
                 .ToListAsync(ct);
-            var entries = rows.Where(r => spendable.Contains(r.CategoryId!)).Select(r => new SpendEntry(r.BookingDate, r.CategoryId!, r.Amount)).ToList();
+            var entries = rows.Where(r => spendable.Contains(r.CategoryId!)).Select(r => new SpendEntry(r.BookingDate, r.CategoryId!, r.Amount, r.Id, r.FromBank)).ToList();
 
             return Results.Ok(PeriodSummaryCalculator.Calculate(s, cats, entries, k, clock.Today));
         });

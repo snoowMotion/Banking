@@ -91,6 +91,7 @@ api.MapTransactions();
 api.MapRules();
 api.MapImportExport();
 api.MapPaste();
+api.MapFixed();
 api.Map("{**rest}", () => Results.NotFound(new { error = "Introuvable." }));
 
 app.Run();

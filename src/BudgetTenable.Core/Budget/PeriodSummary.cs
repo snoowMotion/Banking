@@ -6,6 +6,16 @@ public sealed record EnvelopeLine(string CategoryId, string Label, decimal Budge
 public sealed record PotLine(string CategoryId, string Label, decimal Monthly, decimal Balance, decimal SpentThisPeriod);
 public sealed record HistoryPoint(string Key, string Label, int MonthIndex, decimal Spent);
 
+/// <summary>Une charge fixe de la période : montant attendu face à ce qui a été réellement classé dedans.</summary>
+public sealed record FixedLine(
+    string CategoryId, string Label, decimal Expected, decimal Paid, int Count, DateOnly? LastDate,
+    IReadOnlyList<int> TransactionIds,
+    /// <summary>Vrai si toutes les opérations sont des saisies manuelles (donc annulables d'un clic).</summary>
+    bool AllManual,
+    int? AccountId,
+    /// <summary>due (rien de classé), paid (montant conforme) ou gap (payée, mais montant différent).</summary>
+    string Status);
+
 public sealed record PeriodSummary(
     string Key,
     string Label,
@@ -34,13 +44,14 @@ public sealed record PeriodSummary(
     /// <summary>Dépenses variables cumulées, indice i = fin du jour i (0 = début), jusqu'à <see cref="Elapsed"/>.</summary>
     IReadOnlyList<decimal> DailyCumulative,
     IReadOnlyList<HistoryPoint> History,
-    bool LddsDone);
+    bool LddsDone,
+    IReadOnlyList<FixedLine> FixedLines);
 
 /// <summary>
 /// Dépense imputée à une catégorie : montant signé comme en banque (négatif = débit).
 /// Un crédit rattaché à une catégorie réduit donc la dépense de cette catégorie.
 /// </summary>
-public readonly record struct SpendEntry(DateOnly Date, string CategoryId, decimal Amount)
+public readonly record struct SpendEntry(DateOnly Date, string CategoryId, decimal Amount, int Id = 0, bool FromBank = false)
 {
     public decimal Spent => -Amount;
 }
@@ -81,7 +92,9 @@ public static class PeriodSummaryCalculator
         var elapsed = isCurrent ? Periods.Elapsed(key, day, today) : (isPast ? length : 0);
 
         bool InPeriod(SpendEntry e) => e.Date >= start && e.Date < endEx;
-        var inPeriod = entries.Where(InPeriod).ToList();
+        var inPeriodAll = entries.Where(InPeriod).ToList();
+        var fixedIds = categories.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
+        var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId)).ToList();
         var spentBy = inPeriod.GroupBy(e => e.CategoryId).ToDictionary(g => g.Key, g => g.Sum(e => e.Spent));
         decimal SpentIn(string id) => spentBy.GetValueOrDefault(id);
 
@@ -139,11 +152,23 @@ public static class PeriodSummaryCalculator
             history.Add(new HistoryPoint(k.ToString(), Periods.Label(k, day), k.Month, v));
         }
 
+        var fixedLines = categories
+            .Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0 && !(c.Id == BudgetCalculator.ArkeaId && s.ArkeaSettled))
+            .OrderBy(c => c.Order)
+            .Select(c =>
+            {
+                var es = inPeriodAll.Where(e => e.CategoryId == c.Id).OrderBy(e => e.Date).ToList();
+                var paid = es.Sum(e => e.Spent);
+                var status = es.Count == 0 ? "due" : Math.Abs(paid - c.Amount) <= 0.5m ? "paid" : "gap";
+                return new FixedLine(c.Id, c.Label, c.Amount, paid, es.Count, es.Count > 0 ? es[^1].Date : null,
+                    es.Select(e => e.Id).ToList(), es.All(e => !e.FromBank), c.AccountId, status);
+            }).ToList();
+
         var provisions = r.LddsTransfer;
         return new PeriodSummary(
             key.ToString(), Periods.Label(key, day), start, endEx.AddDays(-1), length, elapsed, isCurrent, isPast,
             inPeriod.Count > 0, r.Income, r.FixedMonthly, provisions, varBudget, varSpent, rest, daysLeft, perDay, projection,
             r.Income - r.FixedMonthly - provisions - varSpent, r.SavingsAmount, envelopes, pots, pots.Sum(p => p.Balance),
-            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()));
+            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines);
     }
 }

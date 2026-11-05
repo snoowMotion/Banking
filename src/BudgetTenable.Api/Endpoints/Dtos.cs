@@ -3,13 +3,13 @@ using BudgetTenable.Core.Domain;
 
 namespace BudgetTenable.Api.Endpoints;
 
-public sealed record CategoryDto(string Id, string Label, CategoryGroup Group, decimal Percentage, decimal Amount, bool Annual, string? Note, decimal CurrentAverage, int Order)
+public sealed record CategoryDto(string Id, string Label, CategoryGroup Group, decimal Percentage, decimal Amount, bool Annual, string? Note, decimal CurrentAverage, int Order, int? AccountId)
 {
-    public static CategoryDto From(Category c) => new(c.Id, c.Label, c.Group, c.Percentage, c.Amount, c.Annual, c.Note, c.CurrentAverage, c.Order);
+    public static CategoryDto From(Category c) => new(c.Id, c.Label, c.Group, c.Percentage, c.Amount, c.Annual, c.Note, c.CurrentAverage, c.Order, c.AccountId);
 }
 
 public sealed record BudgetDto(BudgetSettings Settings, List<CategoryDto> Categories, DateOnly Today, string CurrentPeriod);
-public sealed record CategoryUpdate(string Id, string? Label, decimal? Percentage, decimal? Amount);
+public sealed record CategoryUpdate(string Id, string? Label, decimal? Percentage, decimal? Amount, int? AccountId = null);
 public sealed record BudgetUpdate(BudgetSettings Settings, List<CategoryUpdate>? Categories);
 
 public sealed record AccountDto(int Id, string Label, AccountType Type, string Currency);
@@ -55,7 +55,7 @@ public sealed record PasteItem(
     /// <summary>new, duplicate ou reconcile.</summary>
     string Kind, bool Ambiguous, ExistingRef? Existing,
     string? SuggestedCategoryId,
-    /// <summary>rule, mapping, existing ou none.</summary>
+    /// <summary>rule, existing, mapping, fixed (même montant qu'une charge fixe à payer) ou none.</summary>
     string SuggestionSource, bool Internal,
     /// <summary>Catégorie bancaire normalisée : relie l'opération à sa ligne dans <see cref="BankCategoryInfo"/>.</summary>
     string? BankKey);
@@ -74,3 +74,5 @@ public sealed record PasteCommitResult(int Added, int Reconciled, int Skipped, i
 
 public sealed record CategoryCreate(string? Label, CategoryGroup? Group);
 public sealed record BankCategoryDto(string Key, string Label, string? CategoryId);
+
+public sealed record FixedPaidInput(decimal? Amount, int? AccountId, DateOnly? Date);

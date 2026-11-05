@@ -1,5 +1,6 @@
 using BudgetTenable.Api.Data;
 using BudgetTenable.Api.Services;
+using BudgetTenable.Core.Budget;
 using BudgetTenable.Core.Domain;
 using BudgetTenable.Core.Import;
 using BudgetTenable.Core.Rules;
@@ -40,7 +41,7 @@ public static class PasteEndpoints
         });
     }
 
-    private static async Task<IResult> Preview(PastePreviewRequest req, BudgetDbContext db, IClock clock, CancellationToken ct)
+    private static async Task<IResult> Preview(PastePreviewRequest req, BudgetDbContext db, BudgetStore store, IClock clock, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.Text)) return BudgetEndpoints.Bad("Colle d'abord les opérations copiées depuis ta banque.");
         if (req.Text.Length > MaxChars) return BudgetEndpoints.Bad("Texte trop long.");
@@ -61,6 +62,23 @@ public static class PasteEndpoints
         var mappings = await db.BankCategoryMappings.AsNoTracking().ToDictionaryAsync(m => m.Key, ct);
         var categories = await db.Categories.AsNoTracking().ToListAsync(ct);
 
+        // Charges fixes pas encore payées dans la période de chaque opération : un montant identique à l'une d'elles est une piste.
+        var settings = await store.GetSettingsAsync(ct);
+        var day = settings.StartDay;
+        var fixedCats = categories.Where(c => c.Group == CategoryGroup.Fixe && c.Amount > 0 && !(c.Id == BudgetCalculator.ArkeaId && settings.ArkeaSettled)).ToList();
+        var paidFixed = new HashSet<(string, string)>();
+        if (fixedCats.Count > 0)
+        {
+            var from = Periods.Start(Periods.KeyFor(parsed.Items.Min(x => x.Date), day), day);
+            var to = Periods.EndExclusive(Periods.KeyFor(parsed.Items.Max(x => x.Date), day), day);
+            var fixedIds = fixedCats.Select(c => c.Id).ToHashSet();
+            var rows = await db.Transactions.AsNoTracking()
+                .Where(t => t.CategoryId != null && !t.IsInternalTransfer && t.BookingDate >= from && t.BookingDate < to)
+                .Select(t => new { t.CategoryId, t.BookingDate }).ToListAsync(ct);
+            foreach (var r in rows.Where(r => fixedIds.Contains(r.CategoryId!)))
+                paidFixed.Add((r.CategoryId!, Periods.KeyFor(r.BookingDate, day).ToString()));
+        }
+
         var items = new List<PasteItem>();
         for (var i = 0; i < parsed.Items.Count; i++)
         {
@@ -76,6 +94,18 @@ public static class PasteEndpoints
             else if (ex is { CategoryId: not null }) { categoryId = ex.CategoryId; source = "existing"; }
             else if (p.BankCategory is not null && mappings.TryGetValue(CategoryCreator.KeyOf(p.BankCategory), out var map) && map.CategoryId is not null)
             { categoryId = map.CategoryId; source = "mapping"; }
+            else if (p.Amount < 0)
+            {
+                // Piste, jamais imposée : même montant exact qu'UNE seule charge fixe encore à payer, et soit un libellé qui lui
+                // ressemble, soit un prélèvement (un montant rond seul donnerait trop de fausses pistes).
+                var period = Periods.KeyFor(p.Date, day).ToString();
+                var text = $"{p.Counterparty} {p.Remittance}";
+                var debit = TextNormalizer.Normalize(p.PaymentMethod).StartsWith("PRELEVEMENT", StringComparison.Ordinal);
+                var hits = fixedCats
+                    .Where(c => c.Amount == -p.Amount && !paidFixed.Contains((c.Id, period)) && (debit || Reconciler.TextOverlap(text, $"{c.Label} {c.Note}")))
+                    .ToList();
+                if (hits.Count == 1) { categoryId = hits[0].Id; source = "fixed"; paidFixed.Add((hits[0].Id, period)); }
+            }
 
             items.Add(new PasteItem(i, p.Date, p.Time?.ToString("HH:mm"), p.Amount, p.Counterparty ?? "", p.Remittance, p.BankCategory, p.PaymentMethod, p.Pending,
                 p.ProviderId!, m.Kind.ToString().ToLowerInvariant(), m.Ambiguous,

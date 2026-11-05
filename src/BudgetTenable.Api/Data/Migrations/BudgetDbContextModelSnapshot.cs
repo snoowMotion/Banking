@@ -93,6 +93,9 @@ namespace BudgetTenable.Api.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("AccountId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<decimal>("Amount")
                         .HasColumnType("TEXT");
 
@@ -122,6 +125,8 @@ namespace BudgetTenable.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
 
                     b.ToTable("Categories");
                 });
@@ -252,6 +257,14 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.HasOne("BudgetTenable.Core.Domain.Category", null)
                         .WithMany()
                         .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.Category", b =>
+                {
+                    b.HasOne("BudgetTenable.Core.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 

@@ -21,6 +21,8 @@ public class Category
     /// <summary>Dépense moyenne actuelle, pour comparer à la cible dans l'onglet Budget.</summary>
     public decimal CurrentAverage { get; set; }
     public int Order { get; set; }
+    /// <summary>Compte sur lequel une charge fixe est prélevée ; nul = premier compte. Sert au marquage « payée » par clic.</summary>
+    public int? AccountId { get; set; }
 
     public bool IsAllocation => (Group is CategoryGroup.Variable or CategoryGroup.Pot) && !Annual;
 }
