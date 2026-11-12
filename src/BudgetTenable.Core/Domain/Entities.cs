@@ -1,0 +1,122 @@
+namespace BudgetTenable.Core.Domain;
+
+public enum CategoryGroup { Variable, Pot, Fixe, Ignore }
+public enum CategorySource { None, Rule, Manual }
+public enum TransactionStatus { Booked, Pending }
+public enum AccountType { Perso, Commun }
+public enum RuleField { Both, Counterparty, Remittance }
+public enum RuleDirection { Any, Debit, Credit }
+
+public class Category
+{
+    public string Id { get; set; } = "";
+    public string Label { get; set; } = "";
+    public CategoryGroup Group { get; set; }
+    /// <summary>Part de l'enveloppe, en % (postes variables et pots non annuels).</summary>
+    public decimal Percentage { get; set; }
+    /// <summary>Montant mensuel (charge fixe) ou annuel (provision obligatoire, <see cref="Annual"/>).</summary>
+    public decimal Amount { get; set; }
+    public bool Annual { get; set; }
+    public string? Note { get; set; }
+    /// <summary>Dépense moyenne actuelle, pour comparer à la cible dans l'onglet Budget.</summary>
+    public decimal CurrentAverage { get; set; }
+    public int Order { get; set; }
+    /// <summary>Compte sur lequel une charge fixe est prélevée ; nul = premier compte. Sert au marquage « payée » par clic.</summary>
+    public int? AccountId { get; set; }
+    /// <summary>Première période (yyyy-MM) où la catégorie existe ; nul = depuis toujours. Les valeurs ci-dessus valent dès cette période.</summary>
+    public string? ActiveFrom { get; set; }
+
+    public bool IsAllocation => (Group is CategoryGroup.Variable or CategoryGroup.Pot) && !Annual;
+}
+
+public class Account
+{
+    public int Id { get; set; }
+    public string? ProviderAccountId { get; set; }
+    public string Label { get; set; } = "";
+    public AccountType Type { get; set; }
+    public string Currency { get; set; } = "EUR";
+    /// <summary>IBAN tronqué uniquement (jamais en clair).</summary>
+    public string? IbanMasked { get; set; }
+}
+
+public class Transaction
+{
+    public int Id { get; set; }
+    public int AccountId { get; set; }
+    public Account? Account { get; set; }
+    /// <summary>Nul pour une saisie manuelle.</summary>
+    public string? ProviderTransactionId { get; set; }
+    public DateOnly BookingDate { get; set; }
+    public DateOnly? ValueDate { get; set; }
+    /// <summary>Négatif = débit.</summary>
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "EUR";
+    public TransactionStatus Status { get; set; } = TransactionStatus.Booked;
+    public string? Counterparty { get; set; }
+    public string? RemittanceInfo { get; set; }
+    public string? CategoryId { get; set; }
+    public CategorySource CategorySource { get; set; }
+    public bool IsInternalTransfer { get; set; }
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; }
+
+    public bool IsManual => ProviderTransactionId is null;
+}
+
+public class Rule
+{
+    public int Id { get; set; }
+    public string Pattern { get; set; } = "";
+    public bool IsRegex { get; set; }
+    public RuleField Field { get; set; } = RuleField.Both;
+    /// <summary>Catégorie cible ; nulle si la règle ne fait que marquer un virement interne.</summary>
+    public string? CategoryId { get; set; }
+    public bool MarksInternalTransfer { get; set; }
+    public int Priority { get; set; }
+    public RuleDirection Direction { get; set; } = RuleDirection.Any;
+    /// <summary>Bornes sur la valeur absolue du montant.</summary>
+    public decimal? MinAmount { get; set; }
+    public decimal? MaxAmount { get; set; }
+    public bool Enabled { get; set; } = true;
+}
+
+/// <summary>
+/// Correspondance retenue entre une catégorie affichée par la banque et une catégorie de l'appli.
+/// Une catégorie nulle signifie « ne pas utiliser cette catégorie bancaire ».
+/// </summary>
+public class BankCategoryMapping
+{
+    /// <summary>Libellé bancaire normalisé (sans accents, en majuscules).</summary>
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? CategoryId { get; set; }
+}
+
+/// <summary>
+/// Changement des paramètres d'une catégorie à partir d'une période : il vaut pour cette période et les suivantes,
+/// jusqu'au changement daté suivant. Les périodes d'avant gardent leurs valeurs.
+/// </summary>
+public class CategoryTerm
+{
+    public int Id { get; set; }
+    public string CategoryId { get; set; } = "";
+    /// <summary>Période de départ (yyyy-MM).</summary>
+    public string From { get; set; } = "";
+    public decimal Percentage { get; set; }
+    public decimal Amount { get; set; }
+    public int? AccountId { get; set; }
+    /// <summary>Faux = catégorie arrêtée (archivée) à partir de cette période.</summary>
+    public bool Active { get; set; } = true;
+}
+
+/// <summary>Changement des revenus à partir d'une période (même principe que <see cref="CategoryTerm"/>).</summary>
+public class IncomeTerm
+{
+    public int Id { get; set; }
+    public string From { get; set; } = "";
+    public decimal Net { get; set; }
+    public decimal Partner { get; set; }
+    public decimal Caf { get; set; }
+    public decimal AnnualBonus { get; set; }
+}
