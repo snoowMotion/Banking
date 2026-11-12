@@ -2,7 +2,9 @@ namespace BudgetTenable.Api.Auth;
 
 public static class Middleware
 {
-    private static readonly string[] PublicApiPaths = { "/api/auth/login", "/api/auth/logout", "/api/auth/status" };
+    // Le retour de la banque est public : le navigateur y arrive depuis un autre site, parfois sans la session
+    // (application installée sur téléphone). Il est protégé par son jeton « state » à usage unique.
+    private static readonly string[] PublicApiPaths = { "/api/auth/login", "/api/auth/logout", "/api/auth/status", Endpoints.BankEndpoints.CallbackPath };
 
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app) => app.Use(async (ctx, next) =>
     {
@@ -24,7 +26,7 @@ public static class Middleware
         await next();
     });
 
-    /// <summary>Une seule porte d'entrée : tout /api exige une session valide, sauf la connexion elle-même.</summary>
+    /// <summary>Une seule porte d'entrée : tout /api exige une session valide, sauf la connexion elle-même et le retour de la banque.</summary>
     public static IApplicationBuilder UseApiAuth(this IApplicationBuilder app) => app.Use(async (ctx, next) =>
     {
         var path = ctx.Request.Path;

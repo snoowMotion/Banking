@@ -42,6 +42,8 @@
     </div>
   </header>
 
+  <div id="bankAlert" class="banner warn" role="status" hidden></div>
+
   <div class="view" id="view-budget" hidden>
     <div class="mbar" id="bBar">
       <div class="mnav">
@@ -264,6 +266,23 @@
 
   <div class="view" id="view-regles" hidden>
     <div class="grid">
+      <section class="panel wide" aria-labelledby="h-sync">
+        <h2 id="h-sync">Connexion bancaire</h2>
+        <p class="sub" id="bankIntro"></p>
+        <div id="bankNotice" class="banner" role="status" hidden></div>
+        <div id="bankConns"></div>
+        <div class="drop" id="bankConnect" hidden>
+          <div class="xf"><label for="bankPick">Banque</label><select id="bankPick" class="ctl"></select></div>
+          <div class="row-actions"><button class="btn primary" id="bankGo" type="button">Continuer sur le site de la banque</button><button class="btn" id="bankCancel" type="button">Annuler</button></div>
+        </div>
+        <div class="row-actions" id="bankActions" hidden>
+          <button class="btn primary" id="bankSync" type="button">Synchroniser maintenant</button>
+          <button class="btn" id="bankAdd" type="button">Connecter une banque</button>
+          <span class="msg" id="bankMsg" role="status" aria-live="polite"></span>
+        </div>
+        <div class="result" id="bankResult" hidden></div>
+      </section>
+
       <section class="panel" aria-labelledby="h-imp">
         <h2 id="h-imp">Importer un relevé</h2>
         <p class="sub">Fichier CSV ou OFX/QFX téléchargé sur le site de ta banque. Les opérations déjà importées sont ignorées : tu peux réimporter sans risque.</p>
@@ -282,7 +301,6 @@
           <button class="btn" id="exportBtn2" type="button">Exporter en CSV</button>
           <button class="btn" id="logoutBtn" type="button">Se déconnecter</button>
         </div>
-        <p class="mutline" style="margin-top:14px">Connexion bancaire automatique : pas encore disponible (phase 2). L'import de relevés reste possible ensuite.</p>
       </section>
 
       <section class="panel wide" aria-labelledby="h-bank">

@@ -957,11 +957,163 @@
     } catch (e) { if (e.status !== 401) $('bankList').textContent = e.message; }
   }
 
+  /* ================= Connexion bancaire ================= */
+  let BANK = null;       // état de la synchro bancaire (serveur)
+  let bankReplace = null; // connexion à remplacer quand on choisit une banque (bouton « Reconnecter »)
+  let bankBack = null;   // résultat du retour de la banque, à afficher une fois
+  const BANK_STATUS = { active: ['ok', 'Active'], expired: ['bad', 'Expirée'], revoked: ['bad', 'Révoquée'] };
+  const BANK_BACK = {
+    ok: ['', 'Banque connectée. Indique ci-dessous quel compte de l’appli chaque compte bancaire alimente, puis lance la première synchronisation.'],
+    refuse: ['warn', 'Tu as annulé l’autorisation sur le site de la banque : rien n’a été connecté.'],
+    expire: ['warn', 'L’autorisation a pris plus d’une heure : recommence la connexion.'],
+    invalide: ['warn', 'Ce retour de la banque ne correspond à aucune demande en cours (lien déjà utilisé ?). Recommence la connexion.'],
+    'aucun-compte': ['warn', 'La banque n’a renvoyé aucun compte. En mode gratuit, Enable Banking ne donne accès qu’aux comptes liés à ton application dans son portail : lie-les d’abord là-bas (voir le README).'],
+    erreur: ['warn', 'La connexion à la banque a échoué. Réessaie dans quelques minutes.'],
+  };
+
+  const frDateTime = (iso) => new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const frDay = (iso) => new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  /** Lit le résultat du retour de la banque dans l'adresse (?banque=…), puis le retire de l'adresse. */
+  function readBankBack() {
+    let v = null;
+    try { v = new URLSearchParams(location.search).get('banque'); } catch (e) { /* adresse illisible */ }
+    if (!v) return;
+    bankBack = BANK_BACK[v] ? v : 'erreur';
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* facultatif */ }
+  }
+
+  async function loadBank() {
+    try { BANK = await api('/bank/status'); }
+    catch (e) { if (e.status !== 401) $('bankIntro').textContent = e.message; return; }
+    renderBank();
+    renderBankAlert();
+  }
+
+  /** Bandeau visible sur tous les onglets quand un consentement arrive à échéance ou n'est plus valable. */
+  function renderBankAlert() {
+    const el = $('bankAlert');
+    const due = BANK ? BANK.connections.filter((c) => c.status !== 'active' || c.expiresSoon) : [];
+    el.hidden = !due.length;
+    el.innerHTML = due.map((c) => {
+      const text = c.status === 'active'
+        ? 'La connexion à ' + esc(c.bank) + ' expire ' + (c.daysLeft > 1 ? 'dans ' + c.daysLeft + ' jours' : c.daysLeft === 1 ? 'demain' : 'aujourd’hui') + '. Reconnecte-la pour que les opérations continuent d’arriver.'
+        : 'La connexion à ' + esc(c.bank) + ' n’est plus valable : les opérations n’arrivent plus toutes seules.';
+      return '<div class="row"><span>' + text + '</span>' + (BANK.configured ? '<button class="btn sm" type="button" data-bconn-re="' + c.id + '">Reconnecter</button>' : '') + '</div>';
+    }).join('');
+  }
+
+  function renderBank() {
+    const b = BANK;
+    $('bankIntro').textContent = b.configured
+      ? 'Les opérations de tes comptes arrivent toutes seules' + (b.syncHours > 0 ? ', toutes les ' + String(b.syncHours).replace('.', ',') + ' heures environ' : ' quand tu lances une synchronisation') + ', par Enable Banking. Tes identifiants bancaires ne passent jamais par cette application : tu t’authentifies sur le site de ta banque.'
+      : 'La synchronisation automatique n’est pas configurée sur ce serveur. Le README explique comment créer l’application Enable Banking (gratuite pour ses propres comptes) et renseigner les variables BUDGET_EB_*. Le collage et l’import de relevés fonctionnent sans elle.';
+
+    const note = $('bankNotice');
+    if (bankBack) {
+      note.className = 'banner ' + BANK_BACK[bankBack][0];
+      note.textContent = BANK_BACK[bankBack][1];
+      note.hidden = false;
+      bankBack = null;
+    }
+
+    $('bankConns').innerHTML = b.connections.map((c) => {
+      const st = BANK_STATUS[c.status] || BANK_STATUS.expired;
+      const accOpts = (a) => '<option value="">Ne pas synchroniser</option>' +
+        ACCOUNTS.map((x) => '<option value="' + x.id + '"' + (x.id === a.accountId ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('') +
+        '<option value="__new">Nouveau compte « ' + esc(a.label) + ' »</option>';
+      const info = ['Consentement valable jusqu’au ' + frDay(c.validUntil) + (c.status === 'active' ? ' (' + c.daysLeft + ' jour' + (c.daysLeft > 1 ? 's' : '') + ')' : ''),
+        c.lastSuccessAt ? 'dernière synchro réussie le ' + frDateTime(c.lastSuccessAt) : 'pas encore synchronisée'].join(' · ');
+      return '<div class="bconn"><div class="bhead"><strong>' + esc(c.bank) + '</strong><span class="chip ' + st[0] + '"><i></i>' + st[1] + '</span></div>' +
+        '<small>' + info + '</small>' +
+        (c.lastError ? '<div class="msg err">' + esc(c.lastError) + '</div>' : '') +
+        (c.accounts.length ? c.accounts.map((a) =>
+          '<div class="bankrow"><div><strong>' + esc(a.label) + '</strong>' + (a.ibanMasked ? ' <span class="mut num">' + esc(a.ibanMasked) + '</span>' : '') + '</div>' +
+          '<select class="ctl" data-blink="' + a.id + '" aria-label="Compte de l’appli alimenté par ' + esc(a.label) + '">' + accOpts(a) + '</select></div>').join('')
+          : '<div class="mut">Aucun compte renvoyé par la banque.</div>') +
+        '<div class="row-actions">' + (b.configured ? '<button class="btn sm" type="button" data-bconn-re="' + c.id + '">Reconnecter</button>' : '') +
+        '<button class="btn sm danger" type="button" data-bconn-del="' + c.id + '">Déconnecter</button></div></div>';
+    }).join('');
+
+    $('bankActions').hidden = !b.configured;
+    $('bankSync').hidden = !b.connections.some((c) => c.status === 'active' && c.accounts.some((a) => a.accountId));
+  }
+
+  function bankMsg(text, err) { const m = $('bankMsg'); m.className = err ? 'msg err' : 'msg'; m.textContent = text || ''; }
+
+  /** Affiche le choix de la banque ; « replaces » = connexion à remplacer en cas de succès. */
+  async function bankChoose(replaces) {
+    bankReplace = replaces || null;
+    bankMsg('Chargement des banques…');
+    try {
+      const list = await api('/bank/aspsps');
+      const current = replaces && BANK ? (BANK.connections.find((c) => c.id === replaces) || {}).bank : null;
+      $('bankPick').innerHTML = list.map((x) => '<option value="' + esc(x.name) + '"' + (x.name === current ? ' selected' : '') + '>' + esc(x.name) + (x.beta ? ' (bêta)' : '') + '</option>').join('');
+      $('bankConnect').hidden = false;
+      bankMsg(list.length ? '' : 'Aucune banque proposée pour ce pays.', !list.length);
+    } catch (e) { bankMsg(e.message, true); }
+  }
+
+  async function bankConnect(name, replaces) {
+    if (!name) return;
+    bankMsg('Ouverture du site de la banque…');
+    try {
+      const r = await api('/bank/connect', { method: 'POST', json: { name: name, replaces: replaces || null } });
+      location.href = r.url;   // l'authentification se fait chez la banque ; elle nous renvoie ensuite ici
+    } catch (e) { bankMsg(e.message, true); }
+  }
+
+  async function bankReconnect(id) {
+    const c = BANK && BANK.connections.find((x) => x.id === id);
+    if (c) await bankConnect(c.bank, id);
+  }
+
+  async function bankSyncNow() {
+    const out = $('bankResult'), btn = $('bankSync');
+    out.hidden = true;
+    bankMsg('Synchronisation en cours…');
+    btn.disabled = true;
+    try {
+      const r = await api('/bank/sync', { method: 'POST' });
+      bankMsg('');
+      out.hidden = false;
+      out.innerHTML = (r.results.length ? r.results.map((x) => x.error
+        ? '<div><strong>' + esc(x.bank) + '</strong> : <span class="neg">' + esc(x.error) + '</span></div>'
+        : '<div><strong>' + esc(x.bank) + '</strong> : <b>' + x.added + '</b> ajoutées, <b>' + x.reconciled + '</b> rapprochées, <b>' + x.duplicates + '</b> déjà connues' +
+          (x.removedPending ? ', <b>' + x.removedPending + '</b> en attente retirées (annulées ou débitées pour un autre montant)' : '') + '.</div>').join('')
+        : '<div>Aucune connexion active à synchroniser.</div>') +
+        (r.toSort ? '<div><b>' + r.toSort + '</b> à trier au total. <a href="#tri">Aller trier</a></div>' : '');
+      setBadge(r.toSort);
+      await loadBank();
+    } catch (e) { bankMsg(e.message, true); }
+    finally { btn.disabled = false; }
+  }
+
+  async function bankLink(select) {
+    const id = +select.dataset.blink, v = select.value;
+    try {
+      await api('/bank/accounts/' + id, { method: 'PUT', json: v === '__new' ? { create: true } : { accountId: v ? +v : null } });
+      if (v === '__new') { ACCOUNTS = await api('/accounts'); buildSelects(); }
+      bankMsg('');
+    } catch (e) { bankMsg(e.message, true); }
+    await loadBank();
+  }
+
+  async function bankDisconnect(id) {
+    const c = BANK && BANK.connections.find((x) => x.id === id);
+    if (!c || !window.confirm('Déconnecter ' + c.bank + ' ? Les opérations déjà récupérées restent ; le consentement est fermé chez Enable Banking.')) return;
+    try { await api('/bank/connections/' + id, { method: 'DELETE' }); bankMsg(''); }
+    catch (e) { bankMsg(e.message, true); }
+    $('bankResult').hidden = true;
+    await loadBank();
+  }
+
   /* ================= Onglet Règles et import ================= */
   const FIELD_LABEL = { both: 'Contrepartie et libellé', counterparty: 'Contrepartie', remittance: 'Libellé' };
   const DIR_LABEL = { any: '', debit: 'débits seulement', credit: 'crédits seulement' };
 
   async function loadRules() {
+    loadBank();
     loadBankMap();
     try { RULES = await api('/rules'); renderRules(); }
     catch (e) { if (e.status !== 401) $('ruleMsg').textContent = e.message; }
@@ -1313,9 +1465,11 @@
     setSync('ok', 'Synchronisé');
     route();
     refreshUnsorted();
+    if (tab !== 'regles') loadBank();   // pour le bandeau d'échéance, visible sur tous les onglets
   }
 
   async function start() {
+    readBankBack();
     try {
       const r = await fetch('/api/auth/status', { credentials: 'same-origin' });
       const st = await r.json();
@@ -1374,6 +1528,16 @@
   $('ruleForm').addEventListener('submit', submitRule);
   $('reapplyBtn').addEventListener('click', reapply);
   $('impBtn').addEventListener('click', doImport);
+  $('bankAdd').addEventListener('click', () => bankChoose(null));
+  $('bankCancel').addEventListener('click', () => { $('bankConnect').hidden = true; bankMsg(''); });
+  $('bankGo').addEventListener('click', () => bankConnect($('bankPick').value, bankReplace));
+  $('bankSync').addEventListener('click', bankSyncNow);
+  $('bankConns').addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.blink) bankLink(e.target); });
+  $('bankConns').addEventListener('click', (e) => {
+    const re = e.target.closest('[data-bconn-re]'), del = e.target.closest('[data-bconn-del]');
+    if (re) bankReconnect(+re.dataset.bconnRe); else if (del) bankDisconnect(+del.dataset.bconnDel);
+  });
+  $('bankAlert').addEventListener('click', (e) => { const re = e.target.closest('[data-bconn-re]'); if (re) bankReconnect(+re.dataset.bconnRe); });
   $('logoutBtn').addEventListener('click', async () => { try { await api('/auth/logout', { method: 'POST' }); } catch (e) { /* déjà déconnecté */ } showLogin(); });
   window.addEventListener('hashchange', () => { if (authed) route(); });
   let raf = 0;

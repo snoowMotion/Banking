@@ -1,6 +1,6 @@
 // Service worker minimal : met le « shell » de l'application en cache pour qu'elle s'ouvre hors ligne.
 // Les appels /api ne sont jamais mis en cache (données financières) ni interceptés.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'budget-shell-' + VERSION;
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 

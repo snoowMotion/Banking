@@ -65,6 +65,88 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.ToTable("Accounts");
                 });
 
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankAccountLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AccountId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ConnectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IbanMasked")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IdentificationHash")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderUid")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("SyncedThrough")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("ConnectionId");
+
+                    b.ToTable("BankAccountLinks");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankAuthState", b =>
+                {
+                    b.Property<string>("State")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AspspCountry")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AspspName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ReplacesConnectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequiredPsuHeaders")
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ValidUntil")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("State");
+
+                    b.ToTable("BankAuthStates");
+                });
+
             modelBuilder.Entity("BudgetTenable.Core.Domain.BankCategoryMapping", b =>
                 {
                     b.Property<string>("Key")
@@ -85,6 +167,57 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.HasIndex("CategoryId");
 
                     b.ToTable("BankCategoryMappings");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AspspCountry")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AspspName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSuccessAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSyncAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequiredPsuHeaders")
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ValidUntil")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("BankConnections");
                 });
 
             modelBuilder.Entity("BudgetTenable.Core.Domain.Category", b =>
@@ -325,6 +458,20 @@ namespace BudgetTenable.Api.Data.Migrations
                     b.ToTable("Transactions");
                 });
 
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankAccountLink", b =>
+                {
+                    b.HasOne("BudgetTenable.Core.Domain.Account", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("BudgetTenable.Core.Domain.BankConnection", null)
+                        .WithMany("Accounts")
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("BudgetTenable.Core.Domain.BankCategoryMapping", b =>
                 {
                     b.HasOne("BudgetTenable.Core.Domain.Category", null)
@@ -377,6 +524,11 @@ namespace BudgetTenable.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Account");
+                });
+
+            modelBuilder.Entity("BudgetTenable.Core.Domain.BankConnection", b =>
+                {
+                    b.Navigation("Accounts");
                 });
 #pragma warning restore 612, 618
         }

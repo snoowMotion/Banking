@@ -58,6 +58,14 @@ Flux technique (API Enable Banking). **À vérifier dans la documentation offici
 5. Transactions : `GET /accounts/{uid}/transactions` avec `date_from`, pagination par `continuation_key`.
 6. Soldes : `GET /accounts/{uid}/balances`.
 
+**Vérification du 12 novembre 2026** (référence de l'API et FAQ officielles), qui corrige ce brief sur quatre points :
+- La synchro planifiée passe de 4 à **6 heures** : beaucoup de banques limitent à quatre lectures par jour les appels faits sans l'utilisateur (sans en-têtes `Psu-*`), et la FAQ recommande d'attendre 6 heures après un `ASPSP_RATE_LIMIT_EXCEEDED`. La synchro manuelle envoie les en-têtes `Psu-*` (tous ceux qu'exige la banque, ou aucun).
+- L'identifiant stable d'une opération est `entry_reference`, pas `transaction_id` (qui peut changer d'une lecture à l'autre). Il manque souvent pour les opérations en attente.
+- La durée du consentement n'est pas toujours 180 jours : elle se lit par banque dans `maximum_consent_validity` (`GET /aspsps`). Une session peut expirer avant terme (`EXPIRED_SESSION`).
+- Pagination : continuer tant qu'une `continuation_key` est renvoyée, même après une page vide, sans changer les autres paramètres. Stratégie `longest` pour la première lecture, `default` ensuite.
+
+Le reste du flux ci-dessus est confirmé : JWT RS256 (`kid` = identifiant de l'application, `iss` = enablebanking.com, `aud` = api.enablebanking.com, 24 h au plus), `GET /aspsps`, `POST /auth`, `POST /sessions`, `GET /accounts/{uid}/transactions`. L'`uid` d'un compte ne vaut que pour sa session ; `identification_hash` le retrouve d'une session à l'autre.
+
 Si la banque de l'utilisateur n'est pas couverte, la solution de repli est l'**import CSV/OFX** (section 7, phase 1), qui reste de toute façon utile.
 
 ## 5. Modèle de données (SQLite)

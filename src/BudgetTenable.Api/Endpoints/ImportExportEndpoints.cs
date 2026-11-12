@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Text;
 using BudgetTenable.Api.Data;
+using BudgetTenable.Api.Services;
 using BudgetTenable.Core.Domain;
 using BudgetTenable.Core.Import;
-using BudgetTenable.Core.Rules;
 using Microsoft.EntityFrameworkCore;
 
 namespace BudgetTenable.Api.Endpoints;
@@ -45,53 +45,11 @@ public static class ImportExportEndpoints
             if (rows.Count > MaxRows) return BudgetEndpoints.Bad($"Trop d'opérations ({MaxRows} maximum par fichier).");
             if (rows.Count == 0) return Results.Ok(new ImportResult(format, 0, 0, 0, 0, 0));
 
-            var assigned = Fingerprint.Assign(rows);
-            var min = rows.Min(r => r.Date).AddDays(-Reconciler.WindowDays);
-            var max = rows.Max(r => r.Date).AddDays(Reconciler.WindowDays);
-            // Suivies par EF : une saisie manuelle ou une opération en attente rapprochée est mise à jour sur place.
-            var existing = await db.Transactions
-                .Where(t => t.AccountId == accountId && t.BookingDate >= min && t.BookingDate <= max)
-                .ToListAsync(ct);
-            var matches = Reconciler.Match(assigned, existing.Select(Reconciler.ToCandidate).ToList());
-
-            var rules = RuleMatcher.Ordered(await db.Rules.AsNoTracking().ToListAsync(ct));
-            var now = time.GetUtcNow().UtcDateTime;
-            var knownIds = existing.Where(t => t.ProviderTransactionId != null).Select(t => t.ProviderTransactionId!).ToHashSet();
-            int added = 0, duplicates = 0, categorized = 0, reconciled = 0;
-            for (var i = 0; i < assigned.Count; i++)
-            {
-                var (row, id) = assigned[i];
-                var m = matches[i];
-                if (m.Kind == MatchKind.Duplicate) { duplicates++; continue; }
-                // Sans aperçu, on ne fusionne que les cas sûrs ; un doute ajoute l'opération plutôt que d'en écraser une.
-                if (m.Kind == MatchKind.Reconcile && !m.Ambiguous)
-                {
-                    Reconciler.Merge(existing.First(t => t.Id == m.ExistingId), row, id);
-                    knownIds.Add(id);
-                    reconciled++;
-                    continue;
-                }
-                if (!knownIds.Add(id)) { duplicates++; continue; }
-                var tx = new Transaction
-                {
-                    AccountId = accountId,
-                    ProviderTransactionId = id,
-                    BookingDate = row.Date,
-                    ValueDate = row.ValueDate,
-                    Amount = row.Amount,
-                    Currency = account.Currency,
-                    Counterparty = Truncate(row.Counterparty, 300),
-                    RemittanceInfo = Truncate(row.Remittance, 600),
-                    CreatedAt = now,
-                };
-                if (RuleMatcher.Apply(tx, rules)) categorized++;
-                db.Transactions.Add(tx);
-                added++;
-            }
+            var r = await TransactionIngestor.IngestAsync(db, account, Fingerprint.Assign(rows), time.GetUtcNow().UtcDateTime, bankSync: false, ct);
             await db.SaveChangesAsync(ct);
 
             var toSort = await db.Transactions.CountAsync(t => t.CategoryId == null && !t.IsInternalTransfer, ct);
-            return Results.Ok(new ImportResult(format, rows.Count, added, duplicates, categorized, toSort, reconciled));
+            return Results.Ok(new ImportResult(format, rows.Count, r.Added, r.Duplicates, r.Categorized, toSort, r.Reconciled));
         });
 
         api.MapGet("/export.csv", async (BudgetDbContext db, CancellationToken ct) =>
@@ -113,8 +71,6 @@ public static class ImportExportEndpoints
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv; charset=utf-8", "depenses-budget.csv");
         });
     }
-
-    private static string? Truncate(string? s, int max) => s is null || s.Length <= max ? s : s[..max];
 
     /// <summary>Champ texte CSV entre guillemets ; neutralise les formules (=, +, -, @) interprétées par les tableurs.</summary>
     internal static string Text(string? s)

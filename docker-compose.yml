@@ -9,9 +9,15 @@ services:
       BUDGET_PIN_FILE: /run/secrets/budget_pin
       # À mettre à "true" seulement si un reverse proxy est la SEULE porte d'entrée (voir README).
       BUDGET_TRUST_PROXY: "true"
+      # Synchronisation bancaire (Enable Banking), facultative : voir le README.
+      #   cp private.key secrets/enablebanking.key && chmod 600 secrets/enablebanking.key
+      # BUDGET_EB_APP_ID: "identifiant-de-ton-application"
+      # BUDGET_EB_KEY_FILE: /run/secrets/eb_key
+      # BUDGET_EB_REDIRECT_URL: "https://budget.example.fr/api/bank/callback"
       TZ: Europe/Paris
     secrets:
       - budget_pin
+      # - eb_key
     volumes:
       - ./data:/data
     ports:
@@ -27,3 +33,5 @@ services:
 secrets:
   budget_pin:
     file: ./secrets/pin.txt
+  # eb_key:
+  #   file: ./secrets/enablebanking.key

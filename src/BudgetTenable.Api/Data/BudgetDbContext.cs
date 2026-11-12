@@ -20,6 +20,9 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<BankCategoryMapping> BankCategoryMappings => Set<BankCategoryMapping>();
     public DbSet<CategoryTerm> CategoryTerms => Set<CategoryTerm>();
     public DbSet<IncomeTerm> IncomeTerms => Set<IncomeTerm>();
+    public DbSet<BankConnection> BankConnections => Set<BankConnection>();
+    public DbSet<BankAccountLink> BankAccountLinks => Set<BankAccountLink>();
+    public DbSet<BankAuthState> BankAuthStates => Set<BankAuthState>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -85,6 +88,36 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(x => x.Label).HasMaxLength(120).IsRequired();
             e.Property(x => x.CategoryId).HasMaxLength(40);
             e.HasOne<Category>().WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<BankConnection>(e =>
+        {
+            e.Property(x => x.SessionId).HasMaxLength(80).IsRequired();
+            e.Property(x => x.AspspName).HasMaxLength(120).IsRequired();
+            e.Property(x => x.AspspCountry).HasMaxLength(2).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(12);
+            e.Property(x => x.RequiredPsuHeaders).HasMaxLength(400);
+            e.Property(x => x.LastError).HasMaxLength(300);
+            e.HasMany(x => x.Accounts).WithOne().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<BankAccountLink>(e =>
+        {
+            e.Property(x => x.ProviderUid).HasMaxLength(80).IsRequired();
+            e.Property(x => x.IdentificationHash).HasMaxLength(300).IsRequired();
+            e.Property(x => x.Label).HasMaxLength(120).IsRequired();
+            e.Property(x => x.IbanMasked).HasMaxLength(40);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.HasOne<Account>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<BankAuthState>(e =>
+        {
+            e.HasKey(x => x.State);
+            e.Property(x => x.State).HasMaxLength(64);
+            e.Property(x => x.AspspName).HasMaxLength(120).IsRequired();
+            e.Property(x => x.AspspCountry).HasMaxLength(2).IsRequired();
+            e.Property(x => x.RequiredPsuHeaders).HasMaxLength(400);
         });
 
         b.Entity<Rule>(e =>
