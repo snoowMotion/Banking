@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using BudgetTenable.Api.Auth;
+using BudgetTenable.Api.Banking;
 using BudgetTenable.Api.Data;
 using BudgetTenable.Api.Endpoints;
 using BudgetTenable.Api.Services;
@@ -21,6 +22,29 @@ builder.Services.Configure<AuthOptions>(o =>
     o.CookieKey = cfg["BUDGET_COOKIE_KEY"] ?? o.CookieKey;
     if (bool.TryParse(cfg["BUDGET_INSECURE_COOKIES"], out var insecure)) o.InsecureCookies = insecure;
 });
+
+// Synchronisation bancaire (Enable Banking) : inactive tant que BUDGET_EB_APP_ID n'est pas défini.
+builder.Services.Configure<EnableBankingOptions>(o =>
+{
+    cfg.GetSection("Bank").Bind(o);
+    o.AppId = cfg["BUDGET_EB_APP_ID"] ?? o.AppId;
+    o.PrivateKey = cfg["BUDGET_EB_KEY"] ?? o.PrivateKey;
+    o.PrivateKeyFile = cfg["BUDGET_EB_KEY_FILE"] ?? o.PrivateKeyFile;
+    o.RedirectUrl = cfg["BUDGET_EB_REDIRECT_URL"] ?? o.RedirectUrl;
+    o.Country = (cfg["BUDGET_EB_COUNTRY"] ?? o.Country).Trim().ToUpperInvariant();
+    o.ApiUrl = cfg["BUDGET_EB_API_URL"] ?? o.ApiUrl;
+    if (double.TryParse(cfg["BUDGET_SYNC_HOURS"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hours)) o.SyncHours = hours;
+});
+builder.Services.AddSingleton<EnableBankingAuth>();
+builder.Services.AddSingleton<BankSyncGate>();
+builder.Services.AddHttpClient<IEnableBankingClient, EnableBankingClient>((sp, http) =>
+{
+    var o = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EnableBankingOptions>>().Value;
+    http.BaseAddress = new Uri(o.ApiUrl.TrimEnd('/') + "/");
+    http.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddScoped<BankSyncService>();
+builder.Services.AddHostedService<BankSyncWorker>();
 
 var dataDir = Path.GetFullPath(cfg["BUDGET_DATA_DIR"] ?? cfg["Data:Directory"] ?? "data");
 Directory.CreateDirectory(dataDir);
@@ -46,6 +70,10 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy("login", ctx => RateLimitPartition.GetFixedWindowLimiter(
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = permits, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // Retour de la banque : seul endpoint public, limité pour qu'on ne puisse pas y deviner un jeton.
+    o.AddPolicy("bank-callback", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
 // À n'activer que derrière un reverse proxy qui est la seule porte d'entrée : sinon X-Forwarded-For est falsifiable.
@@ -61,6 +89,9 @@ if (trustProxy)
 }
 
 var app = builder.Build();
+
+// Une configuration bancaire incomplète (clé absente, URL de retour invalide) arrête le démarrage avec un message clair.
+_ = app.Services.GetRequiredService<EnableBankingAuth>();
 
 await using (var scope = app.Services.CreateAsyncScope())
     await BudgetStore.InitializeAsync(scope.ServiceProvider.GetRequiredService<BudgetDbContext>(), scope.ServiceProvider.GetRequiredService<IClock>());
@@ -96,6 +127,7 @@ api.MapImportExport();
 api.MapPaste();
 api.MapFixed();
 api.MapCategories();
+api.MapBank();
 api.Map("{**rest}", () => Results.NotFound(new { error = "Introuvable." }));
 
 app.Run();

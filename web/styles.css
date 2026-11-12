@@ -201,6 +201,14 @@ body{margin:0}
 .rform{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
 .rform .xf.full{grid-column:1/-1}
 .drop{display:grid;gap:10px}
+#bankAlert{margin-bottom:16px}
+.bconn{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.bconn .bhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bconn small{color:var(--muted);font-size:12.5px}
+.bconn .bankrow{border-bottom:0;padding:4px 0}
+.bconn .bankrow .ctl{width:auto;min-width:200px;max-width:100%}
+@media (max-width:520px){.bconn .bankrow{grid-template-columns:minmax(0,1fr)}.bconn .bankrow .ctl{width:100%;min-width:0}}
+#bankConnect,#bankActions,#bankResult,#bankNotice{margin-top:12px}
 .mutline{color:var(--muted);font-size:12.5px;margin:0}
 .result{display:grid;gap:4px;padding:12px 14px;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg);font-size:13.5px}
 .result b{font-family:var(--font-num)}

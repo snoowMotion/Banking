@@ -13,7 +13,11 @@ public enum MatchKind
     Reconcile,
 }
 
-public sealed record ExistingCandidate(int Id, DateOnly Date, decimal Amount, bool IsManual, bool IsPending, string? ProviderId, string Text);
+/// <param name="Adoptable">
+/// Opération débitée venue d'un collage ou d'un fichier, que la synchro bancaire peut reprendre à son compte :
+/// la date affichée par le site de la banque et la date comptable de l'API diffèrent souvent d'un jour ou deux.
+/// </param>
+public sealed record ExistingCandidate(int Id, DateOnly Date, decimal Amount, bool IsManual, bool IsPending, string? ProviderId, string Text, bool Adoptable = false);
 public sealed record MatchResult(MatchKind Kind, int? ExistingId, bool Ambiguous);
 
 /// <summary>
@@ -52,7 +56,7 @@ public static class Reconciler
                 .Select(e => (E: e, Diff: Math.Abs(e.Date.DayNumber - tx.Date.DayNumber), Overlap: Overlaps(tokens, Tokens(e.Text))))
                 .Where(x => x.E.IsManual
                     ? x.Diff <= WindowDays
-                    : x.E.IsPending ? x.Diff <= WindowDays && x.Overlap
+                    : x.E.IsPending || x.E.Adoptable ? x.Diff <= WindowDays && x.Overlap
                     : x.Diff == 0 && x.Overlap)   // opération déjà débitée : même jour et même enseigne
                 .OrderBy(x => x.Diff).ThenByDescending(x => x.Overlap).ThenBy(x => x.E.IsManual ? 1 : 0)
                 .ToList();
@@ -61,7 +65,7 @@ public static class Reconciler
             var best = scored[0];
             var ambiguous = scored.Count > 1 && scored[1].Diff == best.Diff && scored[1].Overlap == best.Overlap;
             used.Add(best.E.Id);
-            var booked = !best.E.IsManual && !best.E.IsPending;
+            var booked = !best.E.IsManual && !best.E.IsPending && !best.E.Adoptable;
             results[i] = new MatchResult(booked ? MatchKind.Duplicate : MatchKind.Reconcile, best.E.Id, ambiguous && !booked);
         }
         return results!;
@@ -77,9 +81,13 @@ public static class Reconciler
         existing.RemittanceInfo ??= row.Remittance;
     }
 
-    public static ExistingCandidate ToCandidate(Transaction t) => new(
+    public static ExistingCandidate ToCandidate(Transaction t) => ToCandidate(t, false);
+
+    /// <param name="forBankSync">Vrai pour la synchro bancaire : les opérations collées ou importées deviennent adoptables.</param>
+    public static ExistingCandidate ToCandidate(Transaction t, bool forBankSync) => new(
         t.Id, t.BookingDate, t.Amount, t.IsManual, t.Status == TransactionStatus.Pending, t.ProviderTransactionId,
-        string.Join(' ', t.Note, t.Counterparty, t.RemittanceInfo));
+        string.Join(' ', t.Note, t.Counterparty, t.RemittanceInfo),
+        forBankSync && !t.IsManual && t.Status != TransactionStatus.Pending && !Banking.BankFeed.IsFromSync(t.ProviderTransactionId));
 
     private static readonly HashSet<string> Noise = new() { "CB", "CARTE", "PAIEMENT", "PRLV", "VIR", "VIREMENT", "ACHAT", "LIGNE", "FACTURE", "SEPA", "PAYMENTS", "PAYMENT", "ACHAT" };
 
