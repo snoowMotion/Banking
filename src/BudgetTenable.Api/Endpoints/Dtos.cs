@@ -98,3 +98,5 @@ public sealed record MergeInput(string? IntoId);
 public sealed record BankCategoryDto(string Key, string Label, string? CategoryId);
 
 public sealed record FixedPaidInput(decimal? Amount, int? AccountId, DateOnly? Date);
+
+public sealed record ExtraInput(decimal? Amount, string? Label, int? AccountId, DateOnly? Date);

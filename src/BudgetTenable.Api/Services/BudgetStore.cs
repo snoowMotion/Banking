@@ -47,7 +47,23 @@ public sealed class BudgetStore(BudgetDbContext db)
         if (!await db.AppSettings.AnyAsync())
             db.AppSettings.Add(new AppSetting { Id = 1, Json = JsonSerializer.Serialize(BudgetDefaults.Settings(), Json) });
         await db.SaveChangesAsync();
+        await EnsureExtraCategoryAsync(db);
         await MigrateArkeaFlagAsync(db, clock);
+    }
+
+    /// <summary>
+    /// Les bases créées avant les primes n'ont pas la ligne « Primes et rentrées exceptionnelles » : on la crée une fois.
+    /// C'est de la donnée (le groupe est une colonne texte), pas un changement de schéma.
+    /// </summary>
+    private static async Task EnsureExtraCategoryAsync(BudgetDbContext db)
+    {
+        if (await db.Categories.AnyAsync(c => c.Group == CategoryGroup.Extra)) return;
+        var ids = (await db.Categories.Select(c => c.Id).ToListAsync()).ToHashSet();
+        var order = ids.Count == 0 ? 0 : await db.Categories.MaxAsync(c => c.Order) + 1;
+        var extra = BudgetDefaults.ExtraCategory(order);
+        for (var n = 2; ids.Contains(extra.Id); n++) extra.Id = $"{BudgetDefaults.ExtraCategoryId}-{n}";
+        db.Categories.Add(extra);
+        await db.SaveChangesAsync();
     }
 
     /// <summary>

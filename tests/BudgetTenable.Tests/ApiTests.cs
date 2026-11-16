@@ -145,7 +145,7 @@ public class ApiTests
                 var b = await Json(await c.GetAsync("/api/budget"));
                 Assert.Equal("2026-10", b.GetProperty("currentPeriod").GetString());
                 Assert.Equal(28, b.GetProperty("settings").GetProperty("startDay").GetInt32());
-                Assert.Equal(26, b.GetProperty("categories").GetArrayLength());
+                Assert.Equal(27, b.GetProperty("categories").GetArrayLength()); // 26 + la ligne des primes
 
                 var put = await c.PutAsJsonAsync("/api/budget", new
                 {
@@ -209,6 +209,70 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/transactions/{refund.GetProperty("id").GetInt32()}")).StatusCode);
         var after = await Json(await c.GetAsync("/api/periods/2026-10"));
         Assert.Equal(182.10m, after.GetProperty("variableSpent").GetDecimal());
+    }
+
+    [Fact]
+    public async Task A_bonus_adds_to_the_balance_of_its_period_without_touching_the_envelopes()
+    {
+        using var f = new AppFactory();
+        var c = await f.LoggedInAsync();
+        var before = await Json(await c.GetAsync("/api/periods/2026-10"));
+
+        var created = await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 500.00, label = "Prime de fin d'année" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var id = (await Json(created)).GetProperty("id").GetInt32();
+
+        var s = await Json(await c.GetAsync("/api/periods/2026-10"));
+        Assert.Equal(500m, s.GetProperty("extraIncome").GetDecimal());
+        Assert.Equal(before.GetProperty("balance").GetDecimal() + 500m, s.GetProperty("balance").GetDecimal());
+        Assert.Equal(before.GetProperty("variableBudget").GetDecimal(), s.GetProperty("variableBudget").GetDecimal());
+        Assert.Equal(before.GetProperty("rest").GetDecimal(), s.GetProperty("rest").GetDecimal());
+        Assert.False(s.GetProperty("hasTransactions").GetBoolean());
+        var line = Assert.Single(s.GetProperty("extraLines").EnumerateArray());
+        Assert.Equal(id, line.GetProperty("id").GetInt32());
+        Assert.Equal("Prime de fin d'année", line.GetProperty("label").GetString());
+        Assert.Equal("2026-10-30", line.GetProperty("date").GetString());   // aujourd'hui (date figée) dans la période en cours
+
+        // Le journal la montre, classée dans la ligne des primes, et on peut la supprimer comme n'importe quelle saisie.
+        var tx = (await Json(await c.GetAsync("/api/transactions?period=2026-10"))).GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("primes", tx.GetProperty("categoryId").GetString());
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/transactions/{id}")).StatusCode);
+        Assert.Equal(0m, (await Json(await c.GetAsync("/api/periods/2026-10"))).GetProperty("extraIncome").GetDecimal());
+    }
+
+    [Fact]
+    public async Task A_bonus_can_be_planned_on_a_future_period_and_is_checked()
+    {
+        using var f = new AppFactory();
+        var c = await f.LoggedInAsync();
+
+        var planned = await c.PostAsJsonAsync("/api/periods/2026-12/extras", new { amount = 1000 });
+        Assert.Equal(HttpStatusCode.Created, planned.StatusCode);
+        var dec = await Json(await c.GetAsync("/api/periods/2026-12"));
+        Assert.Equal(1000m, dec.GetProperty("extraIncome").GetDecimal());
+        Assert.Equal("Prime", dec.GetProperty("extraLines")[0].GetProperty("label").GetString());
+        Assert.Equal("2026-12-28", dec.GetProperty("extraLines")[0].GetProperty("date").GetString());   // période à venir : par défaut son premier jour
+        Assert.Equal(0m, (await Json(await c.GetAsync("/api/periods/2026-10"))).GetProperty("extraIncome").GetDecimal());
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = -50 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 50, date = "2026-12-05" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 50, accountId = 99 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/nimporte/extras", new { amount = 50 })).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_bonus_line_can_be_renamed_but_not_removed_or_duplicated()
+    {
+        using var f = new AppFactory();
+        var c = await f.LoggedInAsync();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/categories/primes", new { label = "Primes et 13e mois" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync("/api/categories/primes/archive", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.DeleteAsync("/api/categories/primes")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync("/api/categories/primes/merge", new { intoId = "shop" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync("/api/categories/shop/merge", new { intoId = "primes" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/categories", new { label = "Autre prime", group = "extra" })).StatusCode);
     }
 
     [Fact]

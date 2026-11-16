@@ -64,6 +64,7 @@ public static class CategoryEndpoints
             if (!TryPeriod(input?.From, settings, clock, out var from)) return BudgetEndpoints.Bad("Période invalide (AAAA-MM attendu).");
             var cat = timeline.AllCategories.FirstOrDefault(c => c.Id == id);
             if (cat is null) return Results.NotFound();
+            if (cat.Group == CategoryGroup.Extra) return Results.Conflict(new { error = ExtraLocked });
             var state = timeline.StateOf(cat, from);
             if (!state.Active) return Results.Conflict(new { error = "Cette catégorie est déjà arrêtée (ou n'existe pas encore) à cette période." });
             await SetActive(db, cat.Id, from, state.Category, active: false, ct);
@@ -92,6 +93,7 @@ public static class CategoryEndpoints
             var source = await db.Categories.FirstOrDefaultAsync(c => c.Id == id, ct);
             var target = await db.Categories.FirstOrDefaultAsync(c => c.Id == input.IntoId, ct);
             if (source is null || target is null) return Results.NotFound();
+            if (source.Group == CategoryGroup.Extra || target.Group == CategoryGroup.Extra) return Results.Conflict(new { error = ExtraLocked });
 
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var moved = await db.Transactions.Where(t => t.CategoryId == id).ExecuteUpdateAsync(u => u.SetProperty(t => t.CategoryId, input.IntoId), ct);
@@ -112,6 +114,7 @@ public static class CategoryEndpoints
         {
             var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == id, ct);
             if (cat is null) return Results.NotFound();
+            if (cat.Group == CategoryGroup.Extra) return Results.Conflict(new { error = ExtraLocked });
             var used = await db.Transactions.CountAsync(t => t.CategoryId == id, ct);
             if (used > 0)
                 return Results.Conflict(new { error = $"{used} opération{(used > 1 ? "s sont classées" : " est classée")} dans cette catégorie : arrête-la ou fusionne-la plutôt que de la supprimer.", used });
@@ -122,6 +125,9 @@ public static class CategoryEndpoints
             return Results.NoContent();
         });
     }
+
+    /// <summary>La ligne des primes est unique et le panneau « Primes et rentrées » en dépend : elle se renomme, rien d'autre.</summary>
+    private const string ExtraLocked = "La ligne des primes et rentrées exceptionnelles ne peut pas être arrêtée, fusionnée ni supprimée (tu peux la renommer).";
 
     private static bool TryPeriod(string? text, BudgetSettings settings, IClock clock, out PeriodKey key)
     {

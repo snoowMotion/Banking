@@ -17,7 +17,7 @@ Utilisateur unique (un foyer, deux personnes au maximum). Pas de multi-tenant.
 Lire d'abord `budget-tenable-reference.html` : c'est la référence fonctionnelle et visuelle. La logique de calcul est dans la fonction `compute()` et le suivi dans `renderSuivi()`.
 
 Principes du modèle :
-- **Revenus** du budget : net de base, part du/de la partenaire, CAF. Les remboursements santé et les extras ne comptent pas comme revenus.
+- **Revenus** du budget : net de base, part du/de la partenaire, CAF. Les remboursements santé ne comptent pas comme revenus. Les primes et rentrées exceptionnelles ne font pas partie de ces revenus : elles se saisissent mois par mois dans le suivi (ligne dédiée « Primes et rentrées exceptionnelles », groupe `Extra`) et s'ajoutent au « Reste du mois » de leur période, sans agrandir les enveloppes variables, les pots ni le virement LDDS. Une saisie manuelle est rapprochée de la ligne bancaire réelle comme une charge fixe cliquée (même compte, même montant, 5 jours).
 - **Charges fixes prélevées chaque mois** : liste de montants (voir seed en section 8).
 - **Provisions obligatoires annuelles** (taxe foncière 1 432 €, assurance auto 396 €) : payées une fois par an, mais budgétées à 1/12 par mois et virées chaque mois vers un compte d'épargne (LDDS).
 - **Enveloppe** = revenus − charges fixes mensuelles − provisions obligatoires mensuelles.
@@ -104,7 +104,7 @@ Si la banque de l'utilisateur n'est pas couverte, la solution de repli est l'**i
 
 Montants mensuels en euros, valeurs actuelles du prototype.
 
-Revenus : net de base 2 050 ; part partenaire 750 ; CAF 198 (total 2 998). Primes et intéressement : 3 000 par an, versés en épargne.
+Revenus : net de base 2 050 ; part partenaire 750 ; CAF 198 (total 2 998). Primes et intéressement : 3 000 par an, versés en épargne (projection de l'onglet Budget). Les primes réellement reçues se saisissent dans le suivi du mois et ajoutent au reste du mois.
 
 Charges fixes prélevées chaque mois (total 1 396) : crédit immobilier 959 ; crédit Arkea 70 (case « soldé » possible) ; télécom 92 ; eau et électricité 62 ; assurances (habitation, juridique, Homeserve, prévoyance) 75 ; abonnements Karapass et Roole-Identicar 23 ; frais bancaires 22 ; Anthropic 23 ; Ring 10 ; PayPal récurrents 60.
 

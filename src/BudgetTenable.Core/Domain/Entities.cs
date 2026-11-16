@@ -1,6 +1,10 @@
 namespace BudgetTenable.Core.Domain;
 
-public enum CategoryGroup { Variable, Pot, Fixe, Ignore }
+/// <summary>
+/// <see cref="Extra"/> : rentrées exceptionnelles (primes). Une opération positive classée là s'ajoute au « Reste du mois »
+/// de sa période, sans toucher aux enveloppes variables, aux pots ni au virement LDDS.
+/// </summary>
+public enum CategoryGroup { Variable, Pot, Fixe, Ignore, Extra }
 public enum CategorySource { None, Rule, Manual }
 public enum TransactionStatus { Booked, Pending }
 public enum AccountType { Perso, Commun }
