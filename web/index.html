@@ -61,7 +61,7 @@
   <div class="grid">
     <section class="panel" aria-labelledby="h-rev">
       <h2 id="h-rev">Revenus du budget</h2>
-      <p class="sub">Modifie un montant, tout le reste se recalcule. Les remboursements santé et les extras ne sont pas comptés.</p>
+      <p class="sub">Modifie un montant, tout le reste se recalcule. Les remboursements santé ne sont pas comptés. Une prime ou une rentrée exceptionnelle se saisit dans le suivi du mois : elle s'ajoute au reste du mois concerné.</p>
       <div class="fields" id="incFields"></div>
       <div class="total-line"><span>Total mensuel</span><span class="num" id="incTotal"></span></div>
       <div class="opts">
@@ -215,6 +215,24 @@
         <p class="fxsum" id="fxSum"></p>
         <div id="fxList" class="fxlist"></div>
         <p class="msg" id="fxMsg" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel wide" aria-labelledby="h-ex">
+        <h2 id="h-ex">Primes et rentrées de la période</h2>
+        <p class="sub">Une prime ou une rentrée exceptionnelle s'ajoute au « Reste du mois » de la période. Elle n'agrandit ni les enveloppes, ni les pots, ni le virement LDDS. Saisis le montant exact reçu, sur le compte qui le reçoit : il sera rapproché de la ligne de la banque (à 5 jours près).</p>
+        <p class="fxsum" id="exSum"></p>
+        <div id="exList" class="fxlist"></div>
+        <div class="xrow">
+          <button class="btn" id="exOpen" type="button" aria-expanded="false" aria-controls="exForm">+ Rentrée</button>
+        </div>
+        <form id="exForm" class="xform" autocomplete="off" hidden style="margin-top:12px">
+          <div class="xf"><label for="exAmt">Montant</label><div class="inp"><input id="exAmt" type="text" inputmode="decimal" placeholder="0,00" aria-label="Montant de la rentrée"><span>&euro;</span></div></div>
+          <div class="xf w2"><label for="exNote">Libellé</label><input id="exNote" type="text" class="ctl" maxlength="120" placeholder="Prime d'objectifs, 13e mois&hellip;"></div>
+          <div class="xf"><label for="exDate">Date</label><input id="exDate" type="date" class="ctl"></div>
+          <div class="xf"><label for="exAcc">Compte</label><select id="exAcc" class="ctl"></select></div>
+          <div class="xf"><button class="btn primary" id="exSubmit" type="submit" style="height:36px">Ajouter</button></div>
+        </form>
+        <p class="msg" id="exMsg" role="status" aria-live="polite"></p>
       </section>
 
       <section class="panel wide" aria-labelledby="h-jr">

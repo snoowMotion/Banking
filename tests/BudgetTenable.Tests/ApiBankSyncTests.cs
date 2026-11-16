@@ -552,6 +552,45 @@ public class ApiBankSyncTests
     }
 
     [Fact]
+    public async Task A_manual_bonus_is_reconciled_with_the_credit_from_the_bank_and_keeps_its_line()
+    {
+        using var app = new BankApp();
+        var c = await app.ConnectedAsync();
+        var manual = await Json(await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 500m, label = "Prime d'objectifs", date = "2026-10-28", accountId = 1 }));
+
+        app.Bank.Feed("uid-perso", Tx("R1", "2026-10-30", 500m, "MON EMPLOYEUR SAS", remittance: "PRIME"));
+        var r = await Sync(c);
+        Assert.Equal(0, r.GetProperty("added").GetInt32());
+        Assert.Equal(1, r.GetProperty("reconciled").GetInt32());
+
+        var tx = Assert.Single(await Transactions(c));
+        Assert.Equal(manual.GetProperty("id").GetInt32(), tx.GetProperty("id").GetInt32());
+        Assert.Equal("primes", tx.GetProperty("categoryId").GetString());
+        Assert.Equal("Prime d'objectifs", tx.GetProperty("note").GetString());
+        Assert.False(tx.GetProperty("isManual").GetBoolean());
+
+        var s = await Json(await c.GetAsync("/api/periods/2026-10"));
+        Assert.Equal(500m, s.GetProperty("extraIncome").GetDecimal());
+        Assert.Single(s.GetProperty("extraLines").EnumerateArray());
+        Assert.True(s.GetProperty("extraLines")[0].GetProperty("fromBank").GetBoolean());
+        Assert.Single(await Transactions(c));
+    }
+
+    [Fact]
+    public async Task A_bonus_entered_more_than_five_days_before_the_credit_is_not_reconciled()
+    {
+        using var app = new BankApp();
+        var c = await app.ConnectedAsync();
+        await c.PostAsJsonAsync("/api/periods/2026-10/extras", new { amount = 500m, date = "2026-10-28", accountId = 1 });
+
+        app.Bank.Feed("uid-perso", Tx("R1", "2026-11-03", 500m, "MON EMPLOYEUR SAS"));   // 6 jours plus tard
+        var r = await Sync(c);
+        Assert.Equal(1, r.GetProperty("added").GetInt32());
+        Assert.Equal(0, r.GetProperty("reconciled").GetInt32());
+        Assert.Equal(2, (await Transactions(c)).Length);
+    }
+
+    [Fact]
     public async Task Operations_already_imported_from_a_file_are_adopted_not_duplicated()
     {
         using var app = new BankApp();

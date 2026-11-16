@@ -16,6 +16,9 @@ public sealed record FixedLine(
     /// <summary>due (rien de classé), paid (montant conforme) ou gap (payée, mais montant différent).</summary>
     string Status);
 
+/// <summary>Une prime ou rentrée exceptionnelle de la période (montant positif).</summary>
+public sealed record ExtraLine(int Id, DateOnly Date, string? Label, decimal Amount, bool FromBank);
+
 public sealed record PeriodSummary(
     string Key,
     string Label,
@@ -45,13 +48,16 @@ public sealed record PeriodSummary(
     IReadOnlyList<decimal> DailyCumulative,
     IReadOnlyList<HistoryPoint> History,
     bool LddsDone,
-    IReadOnlyList<FixedLine> FixedLines);
+    IReadOnlyList<FixedLine> FixedLines,
+    /// <summary>Somme des primes et rentrées exceptionnelles de la période : elle s'ajoute à <see cref="Balance"/> uniquement.</summary>
+    decimal ExtraIncome,
+    IReadOnlyList<ExtraLine> ExtraLines);
 
 /// <summary>
 /// Dépense imputée à une catégorie : montant signé comme en banque (négatif = débit).
 /// Un crédit rattaché à une catégorie réduit donc la dépense de cette catégorie.
 /// </summary>
-public readonly record struct SpendEntry(DateOnly Date, string CategoryId, decimal Amount, int Id = 0, bool FromBank = false)
+public readonly record struct SpendEntry(DateOnly Date, string CategoryId, decimal Amount, int Id = 0, bool FromBank = false, string? Label = null)
 {
     public decimal Spent => -Amount;
 }
@@ -100,10 +106,18 @@ public static class PeriodSummaryCalculator
         var all = timeline.AllCategories;
         var fixedIds = all.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
         var variableIds = all.Where(c => c.Group == CategoryGroup.Variable).Select(c => c.Id).ToHashSet();
+        var extraIds = all.Where(c => c.Group == CategoryGroup.Extra).Select(c => c.Id).ToHashSet();
 
         bool InPeriod(SpendEntry e) => e.Date >= start && e.Date < endEx;
         var inPeriodAll = entries.Where(InPeriod).ToList();
-        var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId)).ToList();
+        // Les primes ne sont ni des dépenses ni des charges : elles restent en dehors de l'enveloppe et de « aucune dépense saisie ».
+        var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId) && !extraIds.Contains(e.CategoryId)).ToList();
+        var extraLines = inPeriodAll
+            .Where(e => extraIds.Contains(e.CategoryId))
+            .OrderBy(e => e.Date).ThenBy(e => e.Id)
+            .Select(e => new ExtraLine(e.Id, e.Date, e.Label, e.Amount, e.FromBank))
+            .ToList();
+        var extraIncome = extraLines.Sum(l => l.Amount);
         var spentBy = inPeriod.GroupBy(e => e.CategoryId).ToDictionary(g => g.Key, g => g.Sum(e => e.Spent));
         decimal SpentIn(string id) => spentBy.GetValueOrDefault(id);
 
@@ -188,7 +202,7 @@ public static class PeriodSummaryCalculator
         return new PeriodSummary(
             key.ToString(), Periods.Label(key, day), start, endEx.AddDays(-1), length, elapsed, isCurrent, isPast,
             inPeriod.Count > 0, r.Income, r.FixedMonthly, provisions, varBudget, varSpent, rest, daysLeft, perDay, projection,
-            r.Income - r.FixedMonthly - provisions - varSpent, r.SavingsAmount, envelopes, pots, pots.Sum(p => p.Balance),
-            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines);
+            r.Income + extraIncome - r.FixedMonthly - provisions - varSpent, r.SavingsAmount, envelopes, pots, pots.Sum(p => p.Balance),
+            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines, extraIncome, extraLines);
     }
 }

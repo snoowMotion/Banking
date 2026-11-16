@@ -28,6 +28,7 @@ public static class CategoryCreator
         if (s.Label.Trim().Length > 120) return "Le nom d'une catégorie fait 120 caractères au plus.";
         if (s.Note is { Length: > 200 }) return "La note fait 200 caractères au plus.";
         if (s.From is not null && !PeriodKey.TryParse(s.From, out _)) return "Période de départ invalide (AAAA-MM attendu).";
+        if (s.Group == CategoryGroup.Extra) return "La ligne des primes et rentrées exceptionnelles existe déjà : on n'en crée pas d'autre.";
         if (s.Annual && s.Group != CategoryGroup.Pot) return "Seule une provision (pot) peut être annuelle.";
         if (s.AccountId is { } a && !accountIds.Contains(a)) return "Compte inconnu.";
         switch (s.Group)

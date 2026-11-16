@@ -7,6 +7,12 @@ public static class BudgetDefaults
 {
     public static BudgetSettings Settings() => new();
 
+    /// <summary>La ligne dédiée aux primes et rentrées exceptionnelles (une seule, groupe <see cref="CategoryGroup.Extra"/>).</summary>
+    public const string ExtraCategoryId = "primes";
+
+    public static Category ExtraCategory(int order) =>
+        new() { Id = ExtraCategoryId, Label = "Primes et rentrées exceptionnelles", Group = CategoryGroup.Extra, Order = order };
+
     public static List<Category> Categories()
     {
         var order = 0;
@@ -47,6 +53,7 @@ public static class BudgetDefaults
             Ignored("rev-salaire", "Revenu : salaire"),
             Ignored("rembt-sante", "Remboursement santé"),
             Ignored("autre-ignore", "À ignorer"),
+            ExtraCategory(order++),
         };
     }
 }

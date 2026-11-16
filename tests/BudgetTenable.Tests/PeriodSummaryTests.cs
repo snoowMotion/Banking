@@ -47,6 +47,42 @@ public class PeriodSummaryTests
     }
 
     [Fact]
+    public void A_bonus_only_adds_to_the_balance_of_its_period()
+    {
+        var spend = new SpendEntry(D("2026-10-30"), "shop", -200m);
+        var without = Run(new[] { spend }, "2026-10-30");
+        var with = Run(new[] { spend, new SpendEntry(D("2026-10-30"), "primes", 500m, 7, Label: "Prime annuelle") }, "2026-10-30");
+
+        Near(500m, with.ExtraIncome, "primes");
+        Near(without.Balance + 500m, with.Balance, "reste du mois");
+        // Les enveloppes, les pots, le virement LDDS et l'objectif d'épargne ne bougent pas.
+        Assert.Equal(without.Income, with.Income);
+        Assert.Equal(without.VariableBudget, with.VariableBudget);
+        Assert.Equal(without.VariableSpent, with.VariableSpent);
+        Assert.Equal(without.Rest, with.Rest);
+        Assert.Equal(without.Provisions, with.Provisions);
+        Assert.Equal(without.SavingsTarget, with.SavingsTarget);
+        Assert.Equal(without.PotsTotal, with.PotsTotal);
+        var line = Assert.Single(with.ExtraLines);
+        Assert.Equal((7, D("2026-10-30"), "Prime annuelle", 500m), (line.Id, line.Date, line.Label, line.Amount));
+    }
+
+    [Fact]
+    public void A_bonus_is_not_spending_and_belongs_to_the_period_of_its_date()
+    {
+        var onlyBonus = new[] { new SpendEntry(D("2026-11-28"), "primes", 300m, 1) };   // premier jour de la période de novembre
+        var oct = Run(onlyBonus, "2026-10-30");
+        var nov = Run(onlyBonus, "2026-10-30", "2026-11");
+
+        Assert.Equal(0m, oct.ExtraIncome);
+        Assert.Empty(oct.ExtraLines);
+        Near(300m, nov.ExtraIncome, "primes de novembre");
+        Assert.False(nov.HasTransactions);                 // « aucune dépense saisie » : une prime n'est pas une dépense
+        Assert.Equal(0m, nov.VariableSpent);
+        Assert.DoesNotContain(nov.Envelopes, e => e.CategoryId == PeriodSummaryCalculator.InactiveEnvelopeId);
+    }
+
+    [Fact]
     public void A_refund_reduces_the_category_spending()
     {
         var s = Run(new[]

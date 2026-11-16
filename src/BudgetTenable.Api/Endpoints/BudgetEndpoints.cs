@@ -47,12 +47,13 @@ public static class BudgetEndpoints
             var s = await store.GetSettingsAsync(ct);
             var (from, to) = PeriodSummaryCalculator.RequiredWindow(s, k);
 
-            var spendable = timeline.AllCategories.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot or CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
+            var spendable = timeline.AllCategories.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot or CategoryGroup.Fixe or CategoryGroup.Extra).Select(c => c.Id).ToHashSet();
             var rows = await db.Transactions.AsNoTracking()
                 .Where(t => t.CategoryId != null && !t.IsInternalTransfer && t.BookingDate >= from && t.BookingDate < to)
-                .Select(t => new { t.Id, t.BookingDate, t.CategoryId, t.Amount, FromBank = t.ProviderTransactionId != null })
+                .Select(t => new { t.Id, t.BookingDate, t.CategoryId, t.Amount, FromBank = t.ProviderTransactionId != null, t.Note, t.Counterparty, t.RemittanceInfo })
                 .ToListAsync(ct);
-            var entries = rows.Where(r => spendable.Contains(r.CategoryId!)).Select(r => new SpendEntry(r.BookingDate, r.CategoryId!, r.Amount, r.Id, r.FromBank)).ToList();
+            var entries = rows.Where(r => spendable.Contains(r.CategoryId!))
+                .Select(r => new SpendEntry(r.BookingDate, r.CategoryId!, r.Amount, r.Id, r.FromBank, r.Note ?? r.Counterparty ?? r.RemittanceInfo)).ToList();
 
             return Results.Ok(PeriodSummaryCalculator.Calculate(timeline, entries, k, clock.Today));
         });

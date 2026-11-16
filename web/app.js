@@ -24,6 +24,7 @@
     ['variable', 'Variable mensuel'],
     ['pot', 'Pots de provisions'],
     ['fixe', 'Charges fixes'],
+    ['extra', 'Primes et rentrées exceptionnelles'],
     ['ignore', 'Hors budget (revenus, remboursements santé…)'],
   ];
 
@@ -385,6 +386,7 @@
     $('rCat').innerHTML = '<option value="__internal">Virement interne (ignoré du budget)</option>' + opts;
     const accs = ACCOUNTS.map((a) => '<option value="' + a.id + '">' + esc(a.label) + '</option>').join('');
     $('xAcc').innerHTML = accs;
+    $('exAcc').innerHTML = accs;
     $('ncAcc').innerHTML = '<option value="">Compte par défaut (' + esc((ACCOUNTS[0] || { label: 'Perso' }).label) + ')</option>' + accs;
     $('impAcc').innerHTML = accs;
     $('pasteAcc').innerHTML = accs;
@@ -536,6 +538,7 @@
     $('envList').innerHTML = sm.envelopes.map((e) => envRow(e, paceFrac)).join('');
 
     renderFixed(sm);
+    renderExtras(sm);
     paceChart(sm);
     histChart(sm);
 
@@ -547,6 +550,7 @@
 
     $('bilan').innerHTML =
       '<div><span>Revenus</span><span class="num">' + f(sm.income) + '</span></div>' +
+      (sm.extraIncome ? '<div><span>Primes et rentrées</span><span class="num pos">+' + f(sm.extraIncome) + '</span></div>' : '') +
       '<div><span>Charges fixes prélevées</span><span class="num">&minus;' + f(sm.fixedMonthly) + '</span></div>' +
       '<div><span>Virement vers le LDDS</span><span class="num">&minus;' + f(sm.provisions) + '</span></div>' +
       '<div><span>Variable dépensé</span><span class="num">&minus;' + f(varSpent) + '</span></div>' +
@@ -707,6 +711,69 @@
       await loadSuivi();
       msg.textContent = pay ? catLabel(id) + ' marquée payée.' : 'Marquage annulé.';
     } catch (err) { btn.disabled = false; msg.className = 'msg err'; msg.textContent = err.message; }
+  }
+
+  /* ================= Primes et rentrées de la période ================= */
+  let exT = 0;
+  function exMsg(t, err) {
+    const m = $('exMsg');
+    m.textContent = t || '';
+    m.className = 'msg' + (err ? ' err' : '');
+    clearTimeout(exT);
+    if (t && !err) exT = setTimeout(() => { m.textContent = ''; }, 3500);
+  }
+
+  function renderExtras(sm) {
+    const lines = sm.extraLines || [];
+    $('exSum').innerHTML = lines.length
+      ? '<b>' + lines.length + '</b> rentrée' + (lines.length > 1 ? 's' : '') + ' · <b>+' + f2(sm.extraIncome) + '</b> ajoutés au reste du mois'
+      : 'Aucune prime ni rentrée exceptionnelle sur cette période.';
+    $('exList').innerHTML = lines.map((l) => {
+      const name = '<span class="nm"><b>' + esc(l.label || 'Prime') + '</b><span>' + frDate(l.date) + '</span></span>';
+      const act = l.fromBank
+        ? '<span class="mut" style="font-size:12.5px">via la banque</span>'
+        : '<button class="btn sm" type="button" data-exdel="' + l.id + '" aria-label="Supprimer la rentrée ' + esc(l.label || 'Prime') + '">Supprimer</button>';
+      return '<div class="fx paid">' + name + '<span class="st"><span class="chip ok"><i></i>+' + f2(l.amount) + '</span>' + act + '</span></div>';
+    }).join('');
+    // La date saisie doit rester dans la période affichée.
+    $('exDate').min = sm.start; $('exDate').max = sm.end;
+    if (!$('exForm').hidden && ($('exDate').value < sm.start || $('exDate').value > sm.end)) $('exDate').value = defaultDate();
+  }
+
+  function toggleExtraForm() {
+    const form = $('exForm'), open = form.hidden;
+    form.hidden = !open;
+    $('exOpen').setAttribute('aria-expanded', String(open));
+    $('exOpen').textContent = open ? 'Fermer' : '+ Rentrée';
+    if (open) {
+      $('exDate').value = defaultDate();
+      if (!$('exAcc').value && ACCOUNTS[0]) $('exAcc').value = String(ACCOUNTS[0].id);
+      $('exAmt').focus();
+    } else exMsg('');
+  }
+
+  async function submitExtra(ev) {
+    ev.preventDefault();
+    const v = parseAmt($('exAmt').value);
+    if (!isFinite(v) || v <= 0) { exMsg('Saisis un montant positif.', true); $('exAmt').focus(); return; }
+    const amount = Math.round(v * 100) / 100;
+    const body = { amount: amount, label: $('exNote').value.trim() || null, date: $('exDate').value || defaultDate(), accountId: +$('exAcc').value || null };
+    $('exSubmit').disabled = true;
+    try { await api('/periods/' + M + '/extras', { method: 'POST', json: body }); }
+    catch (e) { exMsg(e.message, true); return; }
+    finally { $('exSubmit').disabled = false; }
+    $('exAmt').value = ''; $('exNote').value = '';
+    await loadSuivi();
+    exMsg('Rentrée ajoutée : ' + f2(amount) + '.');
+    $('exAmt').focus();
+  }
+
+  async function onExtraClick(e) {
+    const b = e.target.closest('[data-exdel]');
+    if (!b) return;
+    b.disabled = true;
+    try { await api('/transactions/' + b.dataset.exdel, { method: 'DELETE' }); await loadSuivi(); exMsg('Rentrée supprimée.'); }
+    catch (err) { b.disabled = false; exMsg(err.message, true); }
   }
 
   /* ================= Onglet À trier ================= */
@@ -1344,12 +1411,14 @@
         const bits = [];
         if (c.group === 'fixe') bits.push(f(c.amount) + ' / mois');
         else if (c.annual) bits.push(f(c.amount) + ' / an');
-        else if (c.group !== 'ignore') bits.push(pc(c.percentage) + ' de l’enveloppe');
+        else if (c.group !== 'ignore' && c.group !== 'extra') bits.push(pc(c.percentage) + ' de l’enveloppe');
         if (!c.active) bits.push(c.endedFrom ? 'arrêtée à partir de ' + periodLabel(c.endedFrom) : 'existe à partir de ' + periodLabel(c.activeFrom));
         else if (c.activeFrom) bits.push('créée à partir de ' + periodLabel(c.activeFrom));
         bits.push(c.usedBy + ' opération' + (c.usedBy > 1 ? 's' : ''));
         const btn = (act, text, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" type="button" data-mg="' + act + '" data-id="' + esc(c.id) + '">' + text + '</button>';
-        const acts = btn('rename', 'Renommer') + btn('merge', 'Fusionner') +
+        // La ligne des primes est unique : on la renomme, rien d'autre (le serveur refuse le reste).
+        const acts = c.group === 'extra' ? btn('rename', 'Renommer') :
+          btn('rename', 'Renommer') + btn('merge', 'Fusionner') +
           (c.active ? btn('stop', 'Arrêter') : c.endedFrom ? btn('restore', 'Réactiver') : '') +
           (c.usedBy === 0 ? btn('delete', 'Supprimer', 'danger') : '');
         return '<div class="mg' + (c.active ? '' : ' off') + '"><div class="nm"><b>' + esc(c.label) + '</b><span>' + bits.map(esc).join(' &middot; ') + '</span></div><span class="acts">' + acts + '</span></div>';
@@ -1383,7 +1452,7 @@
   }
 
   function openMerge(c) {
-    const others = CATS.filter((x) => x.id !== c.id);
+    const others = CATS.filter((x) => x.id !== c.id && x.group !== 'extra');
     $('mergeTitle').textContent = 'Fusionner « ' + c.label + ' »';
     $('mergeText').textContent = c.usedBy + ' opération' + (c.usedBy > 1 ? 's' : '') + ', ses règles et ses correspondances bancaires passeront dans la catégorie choisie. « ' + c.label + ' » disparaîtra. Les opérations comptent ensuite selon la catégorie choisie, y compris dans l’historique.';
     $('mergeInto').innerHTML = GROUPS.map(([g, label]) => {
@@ -1491,6 +1560,9 @@
   $('xCancel').addEventListener('click', () => { resetForm(true); setMsg(''); $('xDate').value = defaultDate(); });
   $('jList').addEventListener('click', onJournalClick);
   $('fxList').addEventListener('click', onFixedClick);
+  $('exOpen').addEventListener('click', toggleExtraForm);
+  $('exForm').addEventListener('submit', submitExtra);
+  $('exList').addEventListener('click', onExtraClick);
   let qT = 0;
   $('jQ').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(loadSuivi, 250); });
   const go = (k) => () => { M = mshift(M, k); pendDel = null; $('xDate').value = defaultDate(); loadSuivi(); };
