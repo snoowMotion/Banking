@@ -127,6 +127,7 @@ api.MapImportExport();
 api.MapPaste();
 api.MapFixed();
 api.MapExtras();
+api.MapOneOffs();
 api.MapCategories();
 api.MapBank();
 api.Map("{**rest}", () => Results.NotFound(new { error = "Introuvable." }));

@@ -18,6 +18,7 @@ Lire d'abord `budget-tenable-reference.html` : c'est la référence fonctionnell
 
 Principes du modèle :
 - **Revenus** du budget : net de base, part du/de la partenaire, CAF. Les remboursements santé ne comptent pas comme revenus. Les primes et rentrées exceptionnelles ne font pas partie de ces revenus : elles se saisissent mois par mois dans le suivi (ligne dédiée « Primes et rentrées exceptionnelles », groupe `Extra`) et s'ajoutent au « Reste du mois » de leur période, sans agrandir les enveloppes variables, les pots ni le virement LDDS. Une saisie manuelle est rapprochée de la ligne bancaire réelle comme une charge fixe cliquée (même compte, même montant, 5 jours).
+- **Budgets exceptionnels** : lignes propres à une seule période (Noël, un voyage…), saisies dans le suivi du mois avec un nom et un montant prévu. Le prévu s'ajoute à côté de l'enveloppe et réduit l'objectif d'épargne du mois (financement par l'épargne) ; les opérations classées dans la ligne (journal, À trier, collage, règle, synchro) réduisent le « Reste du mois ». Enveloppes, pots et virement LDDS ne changent pas. La ligne disparaît d'elle-même à la période suivante.
 - **Charges fixes prélevées chaque mois** : liste de montants (voir seed en section 8).
 - **Provisions obligatoires annuelles** (taxe foncière 1 432 €, assurance auto 396 €) : payées une fois par an, mais budgétées à 1/12 par mois et virées chaque mois vers un compte d'épargne (LDDS).
 - **Enveloppe** = revenus − charges fixes mensuelles − provisions obligatoires mensuelles.

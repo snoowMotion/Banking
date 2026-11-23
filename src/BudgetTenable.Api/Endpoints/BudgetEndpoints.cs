@@ -47,7 +47,7 @@ public static class BudgetEndpoints
             var s = await store.GetSettingsAsync(ct);
             var (from, to) = PeriodSummaryCalculator.RequiredWindow(s, k);
 
-            var spendable = timeline.AllCategories.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot or CategoryGroup.Fixe or CategoryGroup.Extra).Select(c => c.Id).ToHashSet();
+            var spendable = timeline.AllCategories.Where(c => c.Group is CategoryGroup.Variable or CategoryGroup.Pot or CategoryGroup.Fixe or CategoryGroup.Extra or CategoryGroup.Exceptional).Select(c => c.Id).ToHashSet();
             var rows = await db.Transactions.AsNoTracking()
                 .Where(t => t.CategoryId != null && !t.IsInternalTransfer && t.BookingDate >= from && t.BookingDate < to)
                 .Select(t => new { t.Id, t.BookingDate, t.CategoryId, t.Amount, FromBank = t.ProviderTransactionId != null, t.Note, t.Counterparty, t.RemittanceInfo })
@@ -86,8 +86,10 @@ public static class BudgetEndpoints
         };
 
         var later = new List<LaterChange>();
+        // L'arrêt d'un budget exceptionnel est posé d'office : ce n'est pas un changement « prévu » à signaler.
+        var oneOffIds = timeline.AllCategories.Where(c => c.Group == CategoryGroup.Exceptional).Select(c => c.Id).ToHashSet();
         foreach (var t in await db.CategoryTerms.AsNoTracking().ToListAsync(ct))
-            if (PeriodKey.TryParse(t.From, out var f) && f > p) later.Add(new LaterChange("category", t.CategoryId, t.From));
+            if (!oneOffIds.Contains(t.CategoryId) && PeriodKey.TryParse(t.From, out var f) && f > p) later.Add(new LaterChange("category", t.CategoryId, t.From));
         foreach (var t in await db.IncomeTerms.AsNoTracking().ToListAsync(ct))
             if (PeriodKey.TryParse(t.From, out var f) && f > p) later.Add(new LaterChange("income", null, t.From));
         later.Sort((a, b) => string.CompareOrdinal(a.From, b.From));
