@@ -3,8 +3,10 @@ namespace BudgetTenable.Core.Domain;
 /// <summary>
 /// <see cref="Extra"/> : rentrées exceptionnelles (primes). Une opération positive classée là s'ajoute au « Reste du mois »
 /// de sa période, sans toucher aux enveloppes variables, aux pots ni au virement LDDS.
+/// <see cref="Exceptional"/> : budget exceptionnel d'une seule période (Noël, un voyage…) : un montant prévu en plus de l'enveloppe,
+/// financé par l'épargne du mois. Les opérations classées dedans réduisent le « Reste du mois », sans toucher aux enveloppes ni aux pots.
 /// </summary>
-public enum CategoryGroup { Variable, Pot, Fixe, Ignore, Extra }
+public enum CategoryGroup { Variable, Pot, Fixe, Ignore, Extra, Exceptional }
 public enum CategorySource { None, Rule, Manual }
 public enum TransactionStatus { Booked, Pending }
 public enum AccountType { Perso, Commun }

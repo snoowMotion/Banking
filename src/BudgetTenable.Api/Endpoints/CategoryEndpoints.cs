@@ -65,6 +65,7 @@ public static class CategoryEndpoints
             var cat = timeline.AllCategories.FirstOrDefault(c => c.Id == id);
             if (cat is null) return Results.NotFound();
             if (cat.Group == CategoryGroup.Extra) return Results.Conflict(new { error = ExtraLocked });
+            if (cat.Group == CategoryGroup.Exceptional) return Results.Conflict(new { error = OneOffLocked });
             var state = timeline.StateOf(cat, from);
             if (!state.Active) return Results.Conflict(new { error = "Cette catégorie est déjà arrêtée (ou n'existe pas encore) à cette période." });
             await SetActive(db, cat.Id, from, state.Category, active: false, ct);
@@ -78,6 +79,7 @@ public static class CategoryEndpoints
             if (!TryPeriod(input?.From, settings, clock, out var from)) return BudgetEndpoints.Bad("Période invalide (AAAA-MM attendu).");
             var cat = timeline.AllCategories.FirstOrDefault(c => c.Id == id);
             if (cat is null) return Results.NotFound();
+            if (cat.Group == CategoryGroup.Exceptional) return Results.Conflict(new { error = OneOffLocked });
             var state = timeline.StateOf(cat, from);
             if (state.Active) return Results.Conflict(new { error = "Cette catégorie est déjà active à cette période." });
             if (cat.ActiveFrom is not null && PeriodKey.TryParse(cat.ActiveFrom, out var born) && from < born)
@@ -116,6 +118,8 @@ public static class CategoryEndpoints
             if (cat is null) return Results.NotFound();
             if (cat.Group == CategoryGroup.Extra) return Results.Conflict(new { error = ExtraLocked });
             var used = await db.Transactions.CountAsync(t => t.CategoryId == id, ct);
+            if (used > 0 && cat.Group == CategoryGroup.Exceptional)
+                return Results.Conflict(new { error = $"{used} opération{(used > 1 ? "s sont classées" : " est classée")} dans ce budget exceptionnel : reclasse-{(used > 1 ? "les" : "la")} ailleurs, ou fusionne-le dans une autre catégorie, avant de le supprimer.", used });
             if (used > 0)
                 return Results.Conflict(new { error = $"{used} opération{(used > 1 ? "s sont classées" : " est classée")} dans cette catégorie : arrête-la ou fusionne-la plutôt que de la supprimer.", used });
             var settings = await store.GetSettingsAsync(ct);
@@ -128,6 +132,9 @@ public static class CategoryEndpoints
 
     /// <summary>La ligne des primes est unique et le panneau « Primes et rentrées » en dépend : elle se renomme, rien d'autre.</summary>
     private const string ExtraLocked = "La ligne des primes et rentrées exceptionnelles ne peut pas être arrêtée, fusionnée ni supprimée (tu peux la renommer).";
+
+    /// <summary>Un budget exceptionnel n'existe que pour sa période : il s'arrête tout seul, sa durée ne se règle pas ici.</summary>
+    private const string OneOffLocked = "Un budget exceptionnel ne vaut que pour sa période : il se supprime ou se fusionne, mais ne s'arrête ni ne se réactive.";
 
     private static bool TryPeriod(string? text, BudgetSettings settings, IClock clock, out PeriodKey key)
     {

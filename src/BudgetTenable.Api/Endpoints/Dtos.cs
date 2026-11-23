@@ -100,3 +100,7 @@ public sealed record BankCategoryDto(string Key, string Label, string? CategoryI
 public sealed record FixedPaidInput(decimal? Amount, int? AccountId, DateOnly? Date);
 
 public sealed record ExtraInput(decimal? Amount, string? Label, int? AccountId, DateOnly? Date);
+
+/// <summary>Budget exceptionnel d'une période : <paramref name="Amount"/> est le montant prévu.</summary>
+public sealed record OneOffInput(string? Label, decimal? Amount, string? Note);
+public sealed record OneOffEdit(string? Label, decimal? Amount);

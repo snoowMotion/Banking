@@ -29,6 +29,7 @@ public static class CategoryCreator
         if (s.Note is { Length: > 200 }) return "La note fait 200 caractères au plus.";
         if (s.From is not null && !PeriodKey.TryParse(s.From, out _)) return "Période de départ invalide (AAAA-MM attendu).";
         if (s.Group == CategoryGroup.Extra) return "La ligne des primes et rentrées exceptionnelles existe déjà : on n'en crée pas d'autre.";
+        if (s.Group == CategoryGroup.Exceptional) return "Un budget exceptionnel se crée depuis le suivi du mois, pour une seule période.";
         if (s.Annual && s.Group != CategoryGroup.Pot) return "Seule une provision (pot) peut être annuelle.";
         if (s.AccountId is { } a && !accountIds.Contains(a)) return "Compte inconnu.";
         switch (s.Group)
@@ -62,7 +63,7 @@ public static class CategoryCreator
             Group = s.Group,
             Annual = s.Annual,
             Percentage = s.Group is CategoryGroup.Variable or CategoryGroup.Pot && !s.Annual ? s.Percentage : 0,
-            Amount = s.Group == CategoryGroup.Fixe || s.Annual ? Math.Round(s.Amount, 2) : 0,
+            Amount = s.Group is CategoryGroup.Fixe or CategoryGroup.Exceptional || s.Annual ? Math.Round(s.Amount, 2) : 0,
             AccountId = s.Group == CategoryGroup.Fixe ? s.AccountId : null,
             Note = string.IsNullOrWhiteSpace(s.Note) ? null : s.Note.Trim(),
             ActiveFrom = s.From,

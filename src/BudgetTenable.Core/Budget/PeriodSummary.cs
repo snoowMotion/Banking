@@ -19,6 +19,9 @@ public sealed record FixedLine(
 /// <summary>Une prime ou rentrée exceptionnelle de la période (montant positif).</summary>
 public sealed record ExtraLine(int Id, DateOnly Date, string? Label, decimal Amount, bool FromBank);
 
+/// <summary>Une ligne de budget exceptionnel de la période : montant prévu face aux dépenses classées dedans.</summary>
+public sealed record OneOffLine(string CategoryId, string Label, decimal Budget, decimal Spent, int Count);
+
 public sealed record PeriodSummary(
     string Key,
     string Label,
@@ -51,7 +54,12 @@ public sealed record PeriodSummary(
     IReadOnlyList<FixedLine> FixedLines,
     /// <summary>Somme des primes et rentrées exceptionnelles de la période : elle s'ajoute à <see cref="Balance"/> uniquement.</summary>
     decimal ExtraIncome,
-    IReadOnlyList<ExtraLine> ExtraLines);
+    IReadOnlyList<ExtraLine> ExtraLines,
+    /// <summary>Total prévu des budgets exceptionnels de la période : il réduit l'objectif d'épargne, pas les enveloppes.</summary>
+    decimal OneOffBudget,
+    /// <summary>Dépensé sur les budgets exceptionnels (y compris ceux d'une autre période) : il réduit <see cref="Balance"/>.</summary>
+    decimal OneOffSpent,
+    IReadOnlyList<OneOffLine> OneOffLines);
 
 /// <summary>
 /// Dépense imputée à une catégorie : montant signé comme en banque (négatif = débit).
@@ -66,6 +74,7 @@ public static class PeriodSummaryCalculator
 {
     public const int HistoryLength = 6;
     public const string InactiveEnvelopeId = "__inactive";
+    public const string OtherOneOffId = "__other-oneoff";
     private const int MaxPotMonths = 600;
 
     /// <summary>Fenêtre de dates dont <see cref="Calculate"/> a besoin pour une période donnée.</summary>
@@ -107,11 +116,12 @@ public static class PeriodSummaryCalculator
         var fixedIds = all.Where(c => c.Group == CategoryGroup.Fixe).Select(c => c.Id).ToHashSet();
         var variableIds = all.Where(c => c.Group == CategoryGroup.Variable).Select(c => c.Id).ToHashSet();
         var extraIds = all.Where(c => c.Group == CategoryGroup.Extra).Select(c => c.Id).ToHashSet();
+        var oneOffIds = all.Where(c => c.Group == CategoryGroup.Exceptional).Select(c => c.Id).ToHashSet();
 
         bool InPeriod(SpendEntry e) => e.Date >= start && e.Date < endEx;
         var inPeriodAll = entries.Where(InPeriod).ToList();
-        // Les primes ne sont ni des dépenses ni des charges : elles restent en dehors de l'enveloppe et de « aucune dépense saisie ».
-        var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId) && !extraIds.Contains(e.CategoryId)).ToList();
+        // Les primes et les budgets exceptionnels ne sont ni des dépenses variables ni des charges : hors enveloppe et hors « aucune dépense saisie ».
+        var inPeriod = inPeriodAll.Where(e => !fixedIds.Contains(e.CategoryId) && !extraIds.Contains(e.CategoryId) && !oneOffIds.Contains(e.CategoryId)).ToList();
         var extraLines = inPeriodAll
             .Where(e => extraIds.Contains(e.CategoryId))
             .OrderBy(e => e.Date).ThenBy(e => e.Id)
@@ -198,11 +208,29 @@ public static class PeriodSummaryCalculator
                     es.Select(e => e.Id).ToList(), es.All(e => !e.FromBank), c.AccountId, status);
             }).ToList();
 
+        // Budgets exceptionnels : seuls ceux qui existent à cette période ont un montant prévu. Une dépense classée dans une ligne
+        // d'une autre période réduit quand même le reste du mois, et apparaît à part.
+        var oneOffSpentBy = inPeriodAll.Where(e => oneOffIds.Contains(e.CategoryId)).GroupBy(e => e.CategoryId).ToDictionary(g => g.Key, g => g.ToList());
+        var oneOffLines = categories
+            .Where(c => c.Group == CategoryGroup.Exceptional)
+            .OrderBy(c => c.Order)
+            .Select(c =>
+            {
+                var es = oneOffSpentBy.GetValueOrDefault(c.Id) ?? new List<SpendEntry>();
+                return new OneOffLine(c.Id, c.Label, c.Amount, es.Sum(e => e.Spent), es.Count);
+            }).ToList();
+        var oneOffSpent = oneOffSpentBy.Values.Sum(es => es.Sum(e => e.Spent));
+        var oneOffElsewhere = oneOffSpent - oneOffLines.Sum(l => l.Spent);
+        if (oneOffElsewhere != 0)
+            oneOffLines.Add(new OneOffLine(OtherOneOffId, "Budgets exceptionnels d'une autre période", 0, oneOffElsewhere,
+                oneOffSpentBy.Where(kv => oneOffLines.All(l => l.CategoryId != kv.Key)).Sum(kv => kv.Value.Count)));
+        var oneOffBudget = oneOffLines.Sum(l => l.Budget);
+
         var provisions = r.LddsTransfer;
         return new PeriodSummary(
             key.ToString(), Periods.Label(key, day), start, endEx.AddDays(-1), length, elapsed, isCurrent, isPast,
             inPeriod.Count > 0, r.Income, r.FixedMonthly, provisions, varBudget, varSpent, rest, daysLeft, perDay, projection,
-            r.Income + extraIncome - r.FixedMonthly - provisions - varSpent, r.SavingsAmount, envelopes, pots, pots.Sum(p => p.Balance),
-            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines, extraIncome, extraLines);
+            r.Income + extraIncome - r.FixedMonthly - provisions - varSpent - oneOffSpent, r.SavingsAmount - oneOffBudget, envelopes, pots, pots.Sum(p => p.Balance),
+            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines, extraIncome, extraLines, oneOffBudget, oneOffSpent, oneOffLines);
     }
 }

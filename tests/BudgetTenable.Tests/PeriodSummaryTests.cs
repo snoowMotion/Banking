@@ -67,6 +67,74 @@ public class PeriodSummaryTests
         Assert.Equal((7, D("2026-10-30"), "Prime annuelle", 500m), (line.Id, line.Date, line.Label, line.Amount));
     }
 
+    private static readonly Category Noel = new()
+    {
+        Id = "noel", Label = "Noël", Group = CategoryGroup.Exceptional, Amount = 400m, ActiveFrom = "2026-11", Order = 99,
+    };
+
+    private static BudgetTimeline WithNoel() => new(
+        BudgetDefaults.Settings(),
+        BudgetDefaults.Categories().Append(Noel),
+        new[] { new CategoryTerm { CategoryId = "noel", From = "2026-12", Amount = 400m, Active = false } },
+        Array.Empty<IncomeTerm>());
+
+    [Fact]
+    public void A_one_off_budget_lowers_the_savings_target_and_the_balance_but_not_the_envelopes()
+    {
+        var spend = new SpendEntry(D("2026-11-30"), "shop", -200m);
+        var gift = new SpendEntry(D("2026-12-10"), "noel", -150m, 5, Label: "Jouets");
+        var tl = WithNoel();
+        var plain = PeriodSummaryCalculator.Calculate(BudgetTimeline.Static(BudgetDefaults.Settings(), BudgetDefaults.Categories()), new[] { spend }, PeriodKey.Parse("2026-11"), D("2026-12-12"));
+        var nov = PeriodSummaryCalculator.Calculate(tl, new[] { spend, gift }, PeriodKey.Parse("2026-11"), D("2026-12-12"));
+
+        var line = Assert.Single(nov.OneOffLines);
+        Assert.Equal(("noel", 400m, 150m, 1), (line.CategoryId, line.Budget, line.Spent, line.Count));
+        Near(400m, nov.OneOffBudget, "prévu");
+        Near(150m, nov.OneOffSpent, "dépensé");
+        // Financé par l'épargne du mois : l'objectif baisse du prévu, le reste du mois du réellement dépensé.
+        Near(plain.SavingsTarget - 400m, nov.SavingsTarget, "objectif d'épargne");
+        Near(plain.Balance - 150m, nov.Balance, "reste du mois");
+        // Enveloppes, pots, virement LDDS et dépenses variables ne bougent pas.
+        Assert.Equal(plain.VariableBudget, nov.VariableBudget);
+        Assert.Equal(plain.VariableSpent, nov.VariableSpent);
+        Assert.Equal(plain.Rest, nov.Rest);
+        Assert.Equal(plain.Provisions, nov.Provisions);
+        Assert.Equal(plain.PotsTotal, nov.PotsTotal);
+        Assert.Equal(plain.Envelopes.Count, nov.Envelopes.Count);
+    }
+
+    [Fact]
+    public void A_one_off_budget_only_exists_for_its_period_and_is_not_a_spending_day()
+    {
+        var gift = new SpendEntry(D("2026-12-10"), "noel", -150m, 5);
+        var tl = WithNoel();
+        var oct = PeriodSummaryCalculator.Calculate(tl, new[] { gift }, PeriodKey.Parse("2026-10"), D("2026-12-12"));
+        var dec = PeriodSummaryCalculator.Calculate(tl, new[] { gift }, PeriodKey.Parse("2026-12"), D("2026-12-12"));
+        var nov = PeriodSummaryCalculator.Calculate(tl, new[] { gift }, PeriodKey.Parse("2026-11"), D("2026-12-12"));
+
+        Assert.Empty(oct.OneOffLines);
+        Assert.Equal(0m, oct.OneOffBudget);
+        Assert.Empty(dec.OneOffLines);                       // arrêtée dès la période suivante, plus de montant prévu
+        Assert.Equal(0m, dec.OneOffSpent);                   // la dépense est datée dans la période de novembre
+        Assert.False(nov.HasTransactions);                   // une dépense exceptionnelle n'est pas une dépense variable
+        Assert.Equal(0m, nov.VariableSpent);
+    }
+
+    [Fact]
+    public void Spending_on_a_one_off_of_another_period_still_lowers_the_balance_and_is_shown_apart()
+    {
+        // Un cadeau acheté en octobre mais classé dans « Noël » (période de novembre) : l'argent est bien sorti en octobre.
+        var early = new SpendEntry(D("2026-10-30"), "noel", -80m, 9);
+        var tl = WithNoel();
+        var oct = PeriodSummaryCalculator.Calculate(tl, new[] { early }, PeriodKey.Parse("2026-10"), D("2026-10-30"));
+        var plain = PeriodSummaryCalculator.Calculate(tl, Array.Empty<SpendEntry>(), PeriodKey.Parse("2026-10"), D("2026-10-30"));
+
+        var line = Assert.Single(oct.OneOffLines);
+        Assert.Equal((PeriodSummaryCalculator.OtherOneOffId, 0m, 80m, 1), (line.CategoryId, line.Budget, line.Spent, line.Count));
+        Near(plain.Balance - 80m, oct.Balance, "reste du mois");
+        Assert.Equal(plain.SavingsTarget, oct.SavingsTarget);
+    }
+
     [Fact]
     public void A_bonus_is_not_spending_and_belongs_to_the_period_of_its_date()
     {

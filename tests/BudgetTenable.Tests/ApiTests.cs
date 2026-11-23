@@ -262,6 +262,69 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task A_one_off_budget_is_created_for_one_period_only_and_tracks_its_spending()
+    {
+        using var f = new AppFactory();
+        var c = await f.LoggedInAsync();
+        var before = await Json(await c.GetAsync("/api/periods/2026-11"));
+
+        var created = await c.PostAsJsonAsync("/api/periods/2026-11/oneoffs", new { label = "Noël 2026", amount = 400 });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var id = (await Json(created)).GetProperty("id").GetString()!;
+
+        var nov = await Json(await c.GetAsync("/api/periods/2026-11"));
+        var line = Assert.Single(nov.GetProperty("oneOffLines").EnumerateArray());
+        Assert.Equal((id, 400m, 0m), (line.GetProperty("categoryId").GetString(), line.GetProperty("budget").GetDecimal(), line.GetProperty("spent").GetDecimal()));
+        Assert.Equal(before.GetProperty("savingsTarget").GetDecimal() - 400m, nov.GetProperty("savingsTarget").GetDecimal());
+        Assert.Equal(before.GetProperty("variableBudget").GetDecimal(), nov.GetProperty("variableBudget").GetDecimal());
+        // Les périodes voisines ne le voient pas.
+        Assert.Empty((await Json(await c.GetAsync("/api/periods/2026-10"))).GetProperty("oneOffLines").EnumerateArray());
+        Assert.Empty((await Json(await c.GetAsync("/api/periods/2026-12"))).GetProperty("oneOffLines").EnumerateArray());
+
+        // Une dépense saisie dans la ligne réduit le reste du mois de sa période, et rien d'autre.
+        var spend = await c.PostAsJsonAsync("/api/transactions", new { date = "2026-12-05", amount = -120.50, categoryId = id, note = "Jouets" });
+        Assert.Equal(HttpStatusCode.Created, spend.StatusCode);
+        var after = await Json(await c.GetAsync("/api/periods/2026-11"));
+        Assert.Equal(120.50m, after.GetProperty("oneOffLines")[0].GetProperty("spent").GetDecimal());
+        Assert.Equal(before.GetProperty("balance").GetDecimal() - 120.50m, after.GetProperty("balance").GetDecimal());
+        Assert.Equal(before.GetProperty("variableSpent").GetDecimal(), after.GetProperty("variableSpent").GetDecimal());
+
+        // La ligne n'apparaît pas comme « changement prévu » du budget, et elle est rangée dans son groupe.
+        var budget = await Json(await c.GetAsync("/api/budget?period=2026-11"));
+        Assert.Empty(budget.GetProperty("laterChanges").EnumerateArray());
+        Assert.Equal("exceptional", budget.GetProperty("categories").EnumerateArray().Single(x => x.GetProperty("id").GetString() == id).GetProperty("group").GetString());
+    }
+
+    [Fact]
+    public async Task A_one_off_budget_can_be_edited_checked_and_deleted()
+    {
+        using var f = new AppFactory();
+        var c = await f.LoggedInAsync();
+        var id = (await Json(await c.PostAsJsonAsync("/api/periods/2026-11/oneoffs", new { label = "Noël", amount = 400 }))).GetProperty("id").GetString()!;
+
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync($"/api/periods/2026-11/oneoffs/{id}", new { label = "Noël 2026", amount = 550 })).StatusCode);
+        var line = (await Json(await c.GetAsync("/api/periods/2026-11"))).GetProperty("oneOffLines")[0];
+        Assert.Equal(("Noël 2026", 550m), (line.GetProperty("label").GetString(), line.GetProperty("budget").GetDecimal()));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsJsonAsync($"/api/periods/2026-12/oneoffs/{id}", new { amount = 10 })).StatusCode);   // autre période
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/periods/2026-11/oneoffs/{id}", new { amount = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync("/api/periods/2026-11/oneoffs", new { label = "noel 2026", amount = 10 })).StatusCode);   // nom déjà pris
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-11/oneoffs", new { label = "Voyage", amount = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/2026-11/oneoffs", new { label = " ", amount = 10 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/periods/nimporte/oneoffs", new { label = "Voyage", amount = 10 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/categories", new { label = "Autre", group = "exceptional" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync($"/api/categories/{id}/archive", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync($"/api/categories/{id}/restore", new { from = "2026-12" })).StatusCode);
+
+        // Supprimable tant que rien n'y est classé ; sinon le serveur refuse.
+        var spend = await Json(await c.PostAsJsonAsync("/api/transactions", new { date = "2026-12-05", amount = -20, categoryId = id }));
+        Assert.Equal(HttpStatusCode.Conflict, (await c.DeleteAsync($"/api/categories/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/transactions/{spend.GetProperty("id").GetInt32()}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/categories/{id}")).StatusCode);
+        Assert.Empty((await Json(await c.GetAsync("/api/periods/2026-11"))).GetProperty("oneOffLines").EnumerateArray());
+    }
+
+    [Fact]
     public async Task The_bonus_line_can_be_renamed_but_not_removed_or_duplicated()
     {
         using var f = new AppFactory();

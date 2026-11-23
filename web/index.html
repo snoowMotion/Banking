@@ -235,6 +235,22 @@
         <p class="msg" id="exMsg" role="status" aria-live="polite"></p>
       </section>
 
+      <section class="panel wide" aria-labelledby="h-oo">
+        <h2 id="h-oo">Budgets exceptionnels de la période</h2>
+        <p class="sub">Un budget pour une occasion précise (Noël, un voyage, une réparation) : un montant prévu pour cette période seulement, en plus des enveloppes. Il est pris sur l'épargne du mois, sans toucher aux enveloppes, aux pots ni au virement LDDS. Classe ensuite tes dépenses dans cette ligne (journal, « À trier », collage ou règle) : elle apparaît dans les listes de catégories pendant sa période.</p>
+        <p class="fxsum" id="ooSum"></p>
+        <div id="ooList" class="elist"></div>
+        <div class="xrow">
+          <button class="btn" id="ooOpen" type="button" aria-expanded="false" aria-controls="ooForm">+ Budget exceptionnel</button>
+        </div>
+        <form id="ooForm" class="xform" autocomplete="off" hidden style="margin-top:12px">
+          <div class="xf w2"><label for="ooLabel">Nom</label><input id="ooLabel" type="text" class="ctl" maxlength="120" placeholder="Noël 2026, Voyage&hellip;"></div>
+          <div class="xf"><label for="ooAmt">Montant prévu</label><div class="inp"><input id="ooAmt" type="text" inputmode="decimal" placeholder="0,00" aria-label="Montant prévu"><span>&euro;</span></div></div>
+          <div class="xf"><button class="btn primary" id="ooSubmit" type="submit" style="height:36px">Ajouter</button></div>
+        </form>
+        <p class="msg" id="ooMsg" role="status" aria-live="polite"></p>
+      </section>
+
       <section class="panel wide" aria-labelledby="h-jr">
         <h2 id="h-jr">Journal de la période</h2>
         <div class="jfilters">

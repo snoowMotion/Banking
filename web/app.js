@@ -25,6 +25,7 @@
     ['pot', 'Pots de provisions'],
     ['fixe', 'Charges fixes'],
     ['extra', 'Primes et rentrées exceptionnelles'],
+    ['exceptional', 'Budgets exceptionnels (une seule période)'],
     ['ignore', 'Hors budget (revenus, remboursements santé…)'],
   ];
 
@@ -375,7 +376,7 @@
   function catOptionsHtml(all) {
     return GROUPS.map(([g, label]) => {
       const rows = CATS.filter((c) => c.group === g && (all || c.activeNow));
-      return rows.length ? '<optgroup label="' + esc(label) + '">' + rows.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.label) + (c.activeNow ? '' : ' (arrêtée)') + '</option>').join('') + '</optgroup>' : '';
+      return rows.length ? '<optgroup label="' + esc(label) + '">' + rows.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.label) + (c.activeNow ? '' : c.group === 'exceptional' ? ' (autre période)' : ' (arrêtée)') + '</option>').join('') + '</optgroup>' : '';
     }).join('');
   }
 
@@ -539,6 +540,7 @@
 
     renderFixed(sm);
     renderExtras(sm);
+    renderOneOffs(sm);
     paceChart(sm);
     histChart(sm);
 
@@ -554,6 +556,7 @@
       '<div><span>Charges fixes prélevées</span><span class="num">&minus;' + f(sm.fixedMonthly) + '</span></div>' +
       '<div><span>Virement vers le LDDS</span><span class="num">&minus;' + f(sm.provisions) + '</span></div>' +
       '<div><span>Variable dépensé</span><span class="num">&minus;' + f(varSpent) + '</span></div>' +
+      (sm.oneOffSpent ? '<div><span>Budgets exceptionnels dépensés</span><span class="num">&minus;' + f(sm.oneOffSpent) + '</span></div>' : '') +
       '<div class="res"><span>Reste du mois</span><span class="num' + (sm.balance < 0 ? ' neg' : ' pos') + '">' + f(sm.balance) + '</span></div>';
     $('lddsDone').checked = !!sm.lddsDone;
     $('lddsTxt').firstChild.nodeValue = 'Virement de ' + f(sm.provisions) + ' vers le LDDS fait';
@@ -774,6 +777,80 @@
     b.disabled = true;
     try { await api('/transactions/' + b.dataset.exdel, { method: 'DELETE' }); await loadSuivi(); exMsg('Rentrée supprimée.'); }
     catch (err) { b.disabled = false; exMsg(err.message, true); }
+  }
+
+  /* ================= Budgets exceptionnels de la période ================= */
+  const OTHER_ONEOFF = '__other-oneoff';
+  let ooT = 0;
+  function ooMsg(t, err) {
+    const m = $('ooMsg');
+    m.textContent = t || '';
+    m.className = 'msg' + (err ? ' err' : '');
+    clearTimeout(ooT);
+    if (t && !err) ooT = setTimeout(() => { m.textContent = ''; }, 3500);
+  }
+
+  function renderOneOffs(sm) {
+    const lines = sm.oneOffLines || [];
+    const own = lines.filter((l) => l.categoryId !== OTHER_ONEOFF);
+    $('ooSum').innerHTML = lines.length
+      ? '<b>' + own.length + '</b> budget' + (own.length > 1 ? 's' : '') + ' · prévu <b>' + f2(sm.oneOffBudget) + '</b> · dépensé <b>' + f2(sm.oneOffSpent) + '</b> · l’objectif d’épargne du mois baisse du prévu'
+      : 'Aucun budget exceptionnel sur cette période.';
+    $('ooList').innerHTML = lines.map((l) => {
+      if (l.categoryId === OTHER_ONEOFF)
+        return '<div class="env"><div class="envh"><span class="envn">' + esc(l.label) + '</span><span class="num">' + f2(l.spent) + '</span></div>' +
+          '<div class="envs"><span>' + l.count + ' opération' + (l.count > 1 ? 's' : '') + ' classée' + (l.count > 1 ? 's' : '') + ' dans le budget d’une autre période</span><span>comptées dans le reste du mois</span></div></div>';
+      const id = esc(l.categoryId);
+      return '<div class="env">' + envRow(l, null).replace(/^<div class="env">/, '').replace(/<\/div>$/, '') +
+        '<div class="envs"><span>' + l.count + ' opération' + (l.count > 1 ? 's' : '') + '</span><span class="acts">' +
+        '<button class="btn sm" type="button" data-ooedit="' + id + '" data-amt="' + l.budget + '">Modifier le montant</button> ' +
+        '<button class="btn sm danger" type="button" data-oodel="' + id + '" data-label="' + esc(l.label) + '">Supprimer</button></span></div></div>';
+    }).join('');
+  }
+
+  function toggleOneOffForm() {
+    const form = $('ooForm'), open = form.hidden;
+    form.hidden = !open;
+    $('ooOpen').setAttribute('aria-expanded', String(open));
+    $('ooOpen').textContent = open ? 'Fermer' : '+ Budget exceptionnel';
+    if (open) $('ooLabel').focus(); else ooMsg('');
+  }
+
+  async function submitOneOff(ev) {
+    ev.preventDefault();
+    const label = $('ooLabel').value.trim(), v = parseAmt($('ooAmt').value);
+    if (!label) { ooMsg('Donne un nom à ce budget exceptionnel.', true); $('ooLabel').focus(); return; }
+    if (!isFinite(v) || v <= 0) { ooMsg('Saisis un montant prévu positif.', true); $('ooAmt').focus(); return; }
+    const amount = Math.round(v * 100) / 100;
+    $('ooSubmit').disabled = true;
+    try { await api('/periods/' + M + '/oneoffs', { method: 'POST', json: { label: label, amount: amount } }); }
+    catch (e) { ooMsg(e.message, true); return; }
+    finally { $('ooSubmit').disabled = false; }
+    $('ooLabel').value = ''; $('ooAmt').value = '';
+    await refreshBudgetData();   // la nouvelle catégorie doit apparaître dans les listes de choix
+    await loadSuivi();
+    ooMsg('« ' + label + ' » ajouté : ' + f2(amount) + ' prévus.');
+    $('ooLabel').focus();
+  }
+
+  async function onOneOffClick(e) {
+    const edit = e.target.closest('[data-ooedit]'), del = e.target.closest('[data-oodel]');
+    const b = edit || del;
+    if (!b) return;
+    if (edit) {
+      const answer = window.prompt('Nouveau montant prévu (€)', String(edit.dataset.amt).replace('.', ','));
+      if (answer === null) return;
+      const v = parseAmt(answer);
+      if (!isFinite(v) || v <= 0) { ooMsg('Saisis un montant prévu positif.', true); return; }
+      b.disabled = true;
+      try { await api('/periods/' + M + '/oneoffs/' + encodeURIComponent(edit.dataset.ooedit), { method: 'PUT', json: { amount: Math.round(v * 100) / 100 } }); await loadSuivi(); ooMsg('Montant prévu modifié.'); }
+      catch (err) { b.disabled = false; ooMsg(err.message, true); }
+    } else {
+      if (!window.confirm('Supprimer le budget exceptionnel « ' + del.dataset.label + ' » ?')) return;
+      b.disabled = true;
+      try { await api('/categories/' + encodeURIComponent(del.dataset.oodel), { method: 'DELETE' }); await refreshBudgetData(); await loadSuivi(); ooMsg('Budget exceptionnel supprimé.'); }
+      catch (err) { b.disabled = false; ooMsg(err.message, true); }
+    }
   }
 
   /* ================= Onglet À trier ================= */
@@ -1411,15 +1488,17 @@
         const bits = [];
         if (c.group === 'fixe') bits.push(f(c.amount) + ' / mois');
         else if (c.annual) bits.push(f(c.amount) + ' / an');
+        else if (c.group === 'exceptional') bits.push(f(c.amount) + ' prévus');
         else if (c.group !== 'ignore' && c.group !== 'extra') bits.push(pc(c.percentage) + ' de l’enveloppe');
-        if (!c.active) bits.push(c.endedFrom ? 'arrêtée à partir de ' + periodLabel(c.endedFrom) : 'existe à partir de ' + periodLabel(c.activeFrom));
-        else if (c.activeFrom) bits.push('créée à partir de ' + periodLabel(c.activeFrom));
+        if (c.group === 'exceptional') bits.push(c.active ? 'cette période seulement' : 'créé pour ' + periodLabel(c.activeFrom));
+        else if (!c.active) bits.push(c.endedFrom ? 'arrêtée à partir de ' + periodLabel(c.endedFrom) : 'existe à partir de ' + periodLabel(c.activeFrom));
+        else if (c.activeFrom && c.group !== 'exceptional') bits.push('créée à partir de ' + periodLabel(c.activeFrom));
         bits.push(c.usedBy + ' opération' + (c.usedBy > 1 ? 's' : ''));
         const btn = (act, text, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" type="button" data-mg="' + act + '" data-id="' + esc(c.id) + '">' + text + '</button>';
         // La ligne des primes est unique : on la renomme, rien d'autre (le serveur refuse le reste).
         const acts = c.group === 'extra' ? btn('rename', 'Renommer') :
           btn('rename', 'Renommer') + btn('merge', 'Fusionner') +
-          (c.active ? btn('stop', 'Arrêter') : c.endedFrom ? btn('restore', 'Réactiver') : '') +
+          (c.group === 'exceptional' ? '' : c.active ? btn('stop', 'Arrêter') : c.endedFrom ? btn('restore', 'Réactiver') : '') +
           (c.usedBy === 0 ? btn('delete', 'Supprimer', 'danger') : '');
         return '<div class="mg' + (c.active ? '' : ' off') + '"><div class="nm"><b>' + esc(c.label) + '</b><span>' + bits.map(esc).join(' &middot; ') + '</span></div><span class="acts">' + acts + '</span></div>';
       }).join('');
@@ -1563,6 +1642,9 @@
   $('exOpen').addEventListener('click', toggleExtraForm);
   $('exForm').addEventListener('submit', submitExtra);
   $('exList').addEventListener('click', onExtraClick);
+  $('ooOpen').addEventListener('click', toggleOneOffForm);
+  $('ooForm').addEventListener('submit', submitOneOff);
+  $('ooList').addEventListener('click', onOneOffClick);
   let qT = 0;
   $('jQ').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(loadSuivi, 250); });
   const go = (k) => () => { M = mshift(M, k); pendDel = null; $('xDate').value = defaultDate(); loadSuivi(); };
