@@ -266,3 +266,25 @@ dialog::backdrop{background:rgba(10,14,20,.55)}
 @media (max-width:520px){.mg{grid-template-columns:minmax(0,1fr)}.mg .acts{justify-content:flex-start}}
 
 .field>div>label{display:block}
+
+/* Entrées, sorties, delta */
+.warnc{color:var(--warn)}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.flow .tile{padding:16px 18px;border-right:1px solid var(--line);border-top:4px solid var(--line-strong);margin:0 -1px 0 0;min-width:0}
+.flow .tile .l{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.flow .tile .v{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;margin:6px 0 2px;letter-spacing:-.02em}
+.flow .tile .s{font-size:12.5px;color:var(--muted)}
+.flow .tile.in{border-top-color:var(--accent)}
+.flow .tile.out{border-top-color:var(--c-var)}
+.flow .tile.delta.ok{border-top-color:var(--ok)}.flow .tile.delta.ok .v{color:var(--ok)}
+.flow .tile.delta.warn{border-top-color:var(--warn)}.flow .tile.delta.warn .v{color:var(--warn)}
+.flow .tile.delta.bad{border-top-color:var(--bad)}.flow .tile.delta.bad .v{color:var(--bad)}
+.flowv{margin:0 0 16px;padding:10px 14px;border-left:4px solid var(--line-strong);background:var(--surface);border-radius:6px;font-size:14px}
+.flowv.ok{border-left-color:var(--ok)}.flowv.warn{border-left-color:var(--warn)}.flowv.bad{border-left-color:var(--bad)}
+.flowv.small{margin:10px 0 0;font-size:13px}
+.flowv[hidden]{display:none}
+table.bt{min-width:0}
+.bt td,.bt th{padding:7px 8px}
+.bt tr.sum td{font-weight:700;border-top:1px solid var(--line-strong)}
+.bt tr.delta td{font-size:15px}
+.bt tr.res td{font-weight:700;font-size:15px;border-top:2px solid var(--line-strong);border-bottom:0}

@@ -550,14 +550,8 @@
       '<div class="total-line"><span>Total des pots</span><span class="num' + (sm.potsTotal < 0 ? ' neg' : '') + '">' + f(sm.potsTotal) + '</span></div>';
     fillPot();
 
-    $('bilan').innerHTML =
-      '<div><span>Revenus</span><span class="num">' + f(sm.income) + '</span></div>' +
-      (sm.extraIncome ? '<div><span>Primes et rentrées</span><span class="num pos">+' + f(sm.extraIncome) + '</span></div>' : '') +
-      '<div><span>Charges fixes prélevées</span><span class="num">&minus;' + f(sm.fixedMonthly) + '</span></div>' +
-      '<div><span>Virement vers le LDDS</span><span class="num">&minus;' + f(sm.provisions) + '</span></div>' +
-      '<div><span>Variable dépensé</span><span class="num">&minus;' + f(varSpent) + '</span></div>' +
-      (sm.oneOffSpent ? '<div><span>Budgets exceptionnels dépensés</span><span class="num">&minus;' + f(sm.oneOffSpent) + '</span></div>' : '') +
-      '<div class="res"><span>Reste du mois</span><span class="num' + (sm.balance < 0 ? ' neg' : ' pos') + '">' + f(sm.balance) + '</span></div>';
+    renderFlow(sm);
+    $('bilan').innerHTML = bilanHtml(sm);
     $('lddsDone').checked = !!sm.lddsDone;
     $('lddsTxt').firstChild.nodeValue = 'Virement de ' + f(sm.provisions) + ' vers le LDDS fait';
 
@@ -716,6 +710,76 @@
     } catch (err) { btn.disabled = false; msg.className = 'msg err'; msg.textContent = err.message; }
   }
 
+  /* ================= Entrées, sorties, delta ================= */
+  const fsg = (n) => (Math.round(n) + 0 > 0 ? '+' : '') + nf.format(Math.round(n) + 0);   // delta signé : +320 € / -80 €
+  /** ok : tout est couvert, LDDS compris ; warn : les sorties sont couvertes mais pas le virement LDDS ; bad : les sorties dépassent les entrées. */
+  const flowState = (fl) => (fl.delta < -0.5 ? 'bad' : fl.afterSaving < -0.5 ? 'warn' : 'ok');
+  const stateCls = (st) => (st === 'ok' ? 'pos' : st === 'warn' ? 'warnc' : 'neg');
+
+  function renderFlow(sm) {
+    const P = sm.planned, A = sm.actual, st = flowState(P);
+    const tile = (cls, label, big, sub) => '<div class="tile ' + cls + '"><div class="l">' + label + '</div><div class="v">' + big + '</div><div class="s">' + sub + '</div></div>';
+    $('sFlow').innerHTML =
+      tile('in', 'Entrées', f(P.totalIn), 'réel à date : ' + f(A.totalIn) + (P.extra ? ' · dont primes ' + f(P.extra) : '')) +
+      tile('out', '− Sorties', f(P.totalOut), 'réel à date : ' + f(A.totalOut)) +
+      tile('delta ' + st, '= Delta', fsg(P.delta), 'réel à date : <span class="' + stateCls(flowState(A)) + '">' + fsg(A.delta) + '</span>');
+    const v = $('sFlowV');
+    v.className = 'flowv ' + st;
+    let t;
+    if (st === 'ok') t = 'Budget tenu : les sorties sont couvertes' + (P.saved > 0.5 ? ' et le virement LDDS de <strong>' + f(P.saved) + '</strong> passe' : '') + '. Il reste <strong class="pos">' + fsg(P.afterSaving) + '</strong> sur le compte.';
+    else if (st === 'warn') t = 'Les sorties sont couvertes (<strong>' + fsg(P.delta) + '</strong>), mais pas le virement LDDS de <strong>' + f(P.saved) + '</strong> : il manque <strong class="warnc">' + f(-P.afterSaving) + '</strong>.';
+    else t = 'Les sorties dépassent les entrées de <strong class="neg">' + f(-P.delta) + '</strong>' + (P.saved > 0.5 ? ', sans compter le virement LDDS de ' + f(P.saved) : '') + '.';
+    t += ' À date, il reste <strong class="' + stateCls(flowState(A)) + '">' + fsg(A.afterSaving) + '</strong> après le LDDS.';
+    v.innerHTML = t;
+  }
+
+  /** Bilan détaillé : une colonne « Prévu » (budget du mois) et une colonne « Réel à date ». */
+  function bilanHtml(sm) {
+    const P = sm.planned, A = sm.actual;
+    const amt = (v, neg) => (neg && Math.round(v) !== 0 ? '&minus;' : '') + f(v);   // pas de « −0 € »
+    const row = (label, p, a, cls, neg) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label + '</td><td class="n r">' + amt(p, neg) + '</td><td class="n r">' + amt(a, neg) + '</td></tr>';
+    // Delta : couleur selon l'état du budget (vert, orange, rouge). Reste sur le compte : vert si positif, rouge sinon.
+    const sgn = (label, p, a, cls, byBalance) => '<tr class="' + cls + '"><td>' + label + '</td>' +
+      [[p, P], [a, A]].map(([v, fl]) => '<td class="n r ' + (byBalance ? (v < -0.5 ? 'neg' : 'pos') : stateCls(flowState(fl))) + '">' + fsg(v) + '</td>').join('') + '</tr>';
+    let h = '<table class="bt"><thead><tr><th></th><th class="r">Prévu</th><th class="r">Réel à date</th></tr></thead><tbody>' +
+      '<tr class="grp"><td colspan="3">Entrées</td></tr>' +
+      row('Revenus du budget', P.income, A.income) +
+      (P.extra ? row('Primes et rentrées', P.extra, A.extra) : '') +
+      row('Total des entrées', P.totalIn, A.totalIn, 'sum') +
+      '<tr class="grp"><td colspan="3">Sorties</td></tr>' +
+      row('Charges fixes', P.fixed, A.fixed, '', true) +
+      row('Variable (enveloppes)', P.variable, A.variable, '', true) +
+      (P.oneOff || A.oneOff ? row('Budgets exceptionnels', P.oneOff, A.oneOff, '', true) : '') +
+      row('Total des sorties', P.totalOut, A.totalOut, 'sum', true) +
+      sgn('Delta (entrées − sorties)', P.delta, A.delta, 'sum delta') +
+      '<tr class="grp"><td colspan="3">Épargne</td></tr>' +
+      row('Mis de côté (virement LDDS)', P.saved, A.saved, '', true) +
+      sgn('Reste sur le compte', P.afterSaving, A.afterSaving, 'res', true) +
+      '</tbody></table>' +
+      '<p class="mutline" style="margin-top:8px">Réel à date : variable et budgets exceptionnels au dépensé, charges fixes comptées en entier. Le suivi charge par charge est plus haut.</p>';
+    return h;
+  }
+
+  /** Aperçu avant validation : ce que le montant saisi change au delta du mois. */
+  function flowPreview(host, kind, v) {
+    if (!SUM || !isFinite(v) || v <= 0) { host.hidden = true; host.innerHTML = ''; return; }
+    const P = SUM.planned, A = SUM.actual;
+    const sign = kind === 'in' ? 1 : -1;
+    const P1 = { delta: P.delta + sign * v, afterSaving: P.afterSaving + sign * v, saved: P.saved };
+    const A1 = { delta: A.delta + (kind === 'in' ? v : 0), afterSaving: A.afterSaving + (kind === 'in' ? v : 0), saved: A.saved };
+    const st = flowState(P1);
+    const arrow = (a, b, cls) => fsg(a) + ' &rarr; <strong class="' + cls + '">' + fsg(b) + '</strong>';
+    let verdict;
+    if (kind === 'in') verdict = 'Ça améliore le delta de ' + fsg(v) + '.';
+    else if (st === 'bad') verdict = 'Les sorties dépasseraient les entrées.';
+    else if (st === 'warn') verdict = 'Le virement LDDS ne passerait plus entièrement.';
+    else verdict = 'Le budget tient toujours.';
+    host.hidden = false;
+    host.className = 'flowv small ' + st;
+    host.innerHTML = 'Delta prévu : ' + arrow(P.delta, P1.delta, stateCls(st)) + ' · après LDDS : ' + arrow(P.afterSaving, P1.afterSaving, stateCls(st)) +
+      (kind === 'in' ? ' · delta réel : ' + arrow(A.delta, A1.delta, 'pos') : ' · le delta réel ne bouge qu’avec les dépenses classées dedans') + '. ' + verdict;
+  }
+
   /* ================= Primes et rentrées de la période ================= */
   let exT = 0;
   function exMsg(t, err) {
@@ -765,7 +829,7 @@
     try { await api('/periods/' + M + '/extras', { method: 'POST', json: body }); }
     catch (e) { exMsg(e.message, true); return; }
     finally { $('exSubmit').disabled = false; }
-    $('exAmt').value = ''; $('exNote').value = '';
+    $('exAmt').value = ''; $('exNote').value = ''; flowPreview($('exPrev'), 'in', NaN);
     await loadSuivi();
     exMsg('Rentrée ajoutée : ' + f2(amount) + '.');
     $('exAmt').focus();
@@ -826,7 +890,7 @@
     try { await api('/periods/' + M + '/oneoffs', { method: 'POST', json: { label: label, amount: amount } }); }
     catch (e) { ooMsg(e.message, true); return; }
     finally { $('ooSubmit').disabled = false; }
-    $('ooLabel').value = ''; $('ooAmt').value = '';
+    $('ooLabel').value = ''; $('ooAmt').value = ''; flowPreview($('ooPrev'), 'out', NaN);
     await refreshBudgetData();   // la nouvelle catégorie doit apparaître dans les listes de choix
     await loadSuivi();
     ooMsg('« ' + label + ' » ajouté : ' + f2(amount) + ' prévus.');
@@ -1642,6 +1706,8 @@
   $('exOpen').addEventListener('click', toggleExtraForm);
   $('exForm').addEventListener('submit', submitExtra);
   $('exList').addEventListener('click', onExtraClick);
+  $('ooAmt').addEventListener('input', () => flowPreview($('ooPrev'), 'out', parseAmt($('ooAmt').value)));
+  $('exAmt').addEventListener('input', () => flowPreview($('exPrev'), 'in', parseAmt($('exAmt').value)));
   $('ooOpen').addEventListener('click', toggleOneOffForm);
   $('ooForm').addEventListener('submit', submitOneOff);
   $('ooList').addEventListener('click', onOneOffClick);

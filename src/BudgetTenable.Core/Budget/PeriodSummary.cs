@@ -22,6 +22,20 @@ public sealed record ExtraLine(int Id, DateOnly Date, string? Label, decimal Amo
 /// <summary>Une ligne de budget exceptionnel de la période : montant prévu face aux dépenses classées dedans.</summary>
 public sealed record OneOffLine(string CategoryId, string Label, decimal Budget, decimal Spent, int Count);
 
+/// <summary>
+/// Entrées, sorties et delta d'une période. Les sorties sont les charges fixes, le variable et les budgets exceptionnels ;
+/// le virement vers le LDDS (<see cref="Saved"/>) est de l'épargne mise de côté : il vient après le delta, pas dedans.
+/// </summary>
+public sealed record PeriodFlow(decimal Income, decimal Extra, decimal Fixed, decimal Variable, decimal OneOff, decimal Saved)
+{
+    public decimal TotalIn => Income + Extra;
+    public decimal TotalOut => Fixed + Variable + OneOff;
+    /// <summary>Entrées moins sorties, avant le virement vers le LDDS.</summary>
+    public decimal Delta => TotalIn - TotalOut;
+    /// <summary>Ce qui reste sur le compte une fois le LDDS viré.</summary>
+    public decimal AfterSaving => Delta - Saved;
+}
+
 public sealed record PeriodSummary(
     string Key,
     string Label,
@@ -59,7 +73,11 @@ public sealed record PeriodSummary(
     decimal OneOffBudget,
     /// <summary>Dépensé sur les budgets exceptionnels (y compris ceux d'une autre période) : il réduit <see cref="Balance"/>.</summary>
     decimal OneOffSpent,
-    IReadOnlyList<OneOffLine> OneOffLines);
+    IReadOnlyList<OneOffLine> OneOffLines,
+    /// <summary>Le mois tel que le budget le prévoit : variable et exceptionnels à leur montant budgété.</summary>
+    PeriodFlow Planned,
+    /// <summary>Le mois à date : variable et exceptionnels réellement dépensés (charges fixes comptées en entier, comme dans <see cref="Balance"/>).</summary>
+    PeriodFlow Actual);
 
 /// <summary>
 /// Dépense imputée à une catégorie : montant signé comme en banque (négatif = débit).
@@ -231,6 +249,8 @@ public static class PeriodSummaryCalculator
             key.ToString(), Periods.Label(key, day), start, endEx.AddDays(-1), length, elapsed, isCurrent, isPast,
             inPeriod.Count > 0, r.Income, r.FixedMonthly, provisions, varBudget, varSpent, rest, daysLeft, perDay, projection,
             r.Income + extraIncome - r.FixedMonthly - provisions - varSpent - oneOffSpent, r.SavingsAmount - oneOffBudget, envelopes, pots, pots.Sum(p => p.Balance),
-            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines, extraIncome, extraLines, oneOffBudget, oneOffSpent, oneOffLines);
+            daily, history, s.LddsDone.GetValueOrDefault(key.ToString()), fixedLines, extraIncome, extraLines, oneOffBudget, oneOffSpent, oneOffLines,
+            new PeriodFlow(r.Income, extraIncome, r.FixedMonthly, varBudget, oneOffBudget, provisions),
+            new PeriodFlow(r.Income, extraIncome, r.FixedMonthly, varSpent, oneOffSpent, provisions));
     }
 }

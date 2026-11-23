@@ -104,6 +104,46 @@ public class PeriodSummaryTests
     }
 
     [Fact]
+    public void Flow_shows_income_outgoings_and_delta_planned_and_actual()
+    {
+        var s = Run(new[] { new SpendEntry(D("2026-10-30"), "shop", -200m) }, "2026-10-30");
+
+        Near(2998m, s.Planned.TotalIn, "entrées prévues");
+        Near(s.FixedMonthly + s.VariableBudget, s.Planned.TotalOut, "sorties prévues");
+        Near(2998m - 1396m - s.VariableBudget, s.Planned.Delta, "delta prévu");
+        Near(2998m - 1396m - 200m, s.Actual.Delta, "delta réel");
+        // Le virement LDDS vient après le delta ; le réel retombe sur le « reste du mois » existant, le prévu sur l'objectif d'épargne.
+        Near(s.Provisions, s.Planned.Saved, "mis de côté");
+        Near(s.Balance, s.Actual.AfterSaving, "réel après LDDS = reste du mois");
+        Near(s.SavingsTarget, s.Planned.AfterSaving, "prévu après LDDS = objectif d'épargne");
+    }
+
+    [Fact]
+    public void Adding_a_one_off_budget_lowers_the_planned_delta_but_not_the_actual_one_until_spent()
+    {
+        var plain = PeriodSummaryCalculator.Calculate(BudgetTimeline.Static(BudgetDefaults.Settings(), BudgetDefaults.Categories()), Array.Empty<SpendEntry>(), PeriodKey.Parse("2026-11"), D("2026-11-30"));
+        var planned = PeriodSummaryCalculator.Calculate(WithNoel(), Array.Empty<SpendEntry>(), PeriodKey.Parse("2026-11"), D("2026-11-30"));
+        var spent = PeriodSummaryCalculator.Calculate(WithNoel(), new[] { new SpendEntry(D("2026-12-10"), "noel", -150m, 5) }, PeriodKey.Parse("2026-11"), D("2026-12-12"));
+
+        Near(plain.Planned.Delta - 400m, planned.Planned.Delta, "delta prévu");
+        Near(plain.Planned.TotalOut + 400m, planned.Planned.TotalOut, "sorties prévues");
+        Near(plain.Actual.Delta, planned.Actual.Delta, "delta réel inchangé");
+        Near(plain.Actual.Delta - 150m, spent.Actual.Delta, "delta réel après dépense");
+        Near(planned.SavingsTarget + planned.ExtraIncome, planned.Planned.AfterSaving, "prévu après LDDS");
+    }
+
+    [Fact]
+    public void A_bonus_raises_both_planned_and_actual_income()
+    {
+        var without = Run(Array.Empty<SpendEntry>(), "2026-10-30");
+        var with = Run(new[] { new SpendEntry(D("2026-10-30"), "primes", 500m, 7) }, "2026-10-30");
+
+        Near(without.Planned.Delta + 500m, with.Planned.Delta, "delta prévu");
+        Near(without.Actual.Delta + 500m, with.Actual.Delta, "delta réel");
+        Near(500m, with.Planned.Extra, "rentrées");
+    }
+
+    [Fact]
     public void A_one_off_budget_only_exists_for_its_period_and_is_not_a_spending_day()
     {
         var gift = new SpendEntry(D("2026-12-10"), "noel", -150m, 5);
